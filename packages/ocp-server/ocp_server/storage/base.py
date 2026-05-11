@@ -1,0 +1,82 @@
+"""Abstract storage interface."""
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import Any
+
+from ocp_server.models import Chunk, StateEntry, Scope
+
+
+class BaseStore(ABC):
+
+    @abstractmethod
+    async def setup(self) -> None: ...
+
+    # --- workspace ---
+    @abstractmethod
+    async def workspace_exists(self, workspace_id: str) -> bool: ...
+
+    @abstractmethod
+    async def create_workspace(self, workspace_id: str, root_uri: str, name: str | None, metadata: dict) -> None: ...
+
+    # --- chunks ---
+    @abstractmethod
+    async def upsert_chunk(self, chunk: Chunk, embedding: list[float]) -> None: ...
+
+    @abstractmethod
+    async def get_chunk(self, chunk_id: str) -> Chunk | None: ...
+
+    @abstractmethod
+    async def invalidate_chunks_by_path(self, workspace_id: str, paths: list[str]) -> int: ...
+
+    @abstractmethod
+    async def is_chunk_stale(self, chunk_id: str) -> bool: ...
+
+    @abstractmethod
+    async def search_chunks(
+        self, workspace_id: str, query_embedding: list[float], k: int, filters: dict[str, Any] | None
+    ) -> list[tuple[Chunk, float]]: ...
+
+    @abstractmethod
+    async def list_chunks(
+        self, workspace_id: str, filters: dict | None, cursor: str | None
+    ) -> tuple[list[Chunk], str | None]: ...
+
+    # --- state ---
+    @abstractmethod
+    async def state_set(self, entry: StateEntry) -> int: ...
+
+    @abstractmethod
+    async def state_get(self, key: str, scope: Scope, workspace_id: str | None, session_id: str | None, agent_id: str | None) -> StateEntry | None: ...
+
+    @abstractmethod
+    async def state_list(self, prefix: str | None, scope: Scope | None, workspace_id: str | None, session_id: str | None, agent_id: str | None, cursor: str | None) -> tuple[list[StateEntry], str | None]: ...
+
+    @abstractmethod
+    async def state_delete(self, key: str, scope: Scope, workspace_id: str | None, session_id: str | None, agent_id: str | None, if_version: int | None) -> bool: ...
+
+    # --- sessions ---
+    @abstractmethod
+    async def session_open(self, workspace_id: str, session_id: str, ttl_seconds: int | None, metadata: dict) -> None: ...
+
+    @abstractmethod
+    async def session_close(self, session_id: str) -> bool: ...
+
+    @abstractmethod
+    async def session_exists(self, session_id: str) -> bool: ...
+
+    # --- events ---
+    @abstractmethod
+    async def append_event(self, workspace_id: str, subscription_id: str, event_type: str, payload: dict) -> str: ...
+
+    @abstractmethod
+    async def list_events(self, subscription_id: str, since: str | None) -> list[dict]: ...
+
+    @abstractmethod
+    async def create_subscription(self, workspace_id: str, types: list[str] | None, session_id: str | None) -> str: ...
+
+    @abstractmethod
+    async def delete_subscription(self, subscription_id: str) -> bool: ...
+
+    @abstractmethod
+    async def get_subscriptions_for_workspace(self, workspace_id: str) -> list[dict]: ...

@@ -1,0 +1,26 @@
+[project]
+name = "ocp-conformance"
+version = "0.1.0"
+description = "Open Context Protocol — conformance test suite (OCP-0002)"
+requires-python = ">=3.11"
+dependencies = [
+    "ocp-client",
+    "mcp>=1.0",
+    "pydantic>=2.7",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+ocp-conformance = "ocp_conformance.runner:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ocp_conformance"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
