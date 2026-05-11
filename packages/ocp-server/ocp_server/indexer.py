@@ -6,7 +6,7 @@ import mimetypes
 import os
 from pathlib import Path
 
-from ocp_server.embedder import Embedder
+from ocp_server.embedder import EmbedderProtocol as Embedder
 from ocp_server.models import Chunk, ChunkSource, SourceRange, make_chunk_id
 from ocp_server.storage.base import BaseStore
 

@@ -9,7 +9,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from ocp_server.embedder import Embedder, Tokenizer
+from ocp_server.embedder import make_embedder, Tokenizer
 from ocp_server.indexer import index_workspace
 from ocp_server.storage.sqlite import SQLiteStore
 from ocp_server.tools import coordination, events, retrieval, state, workspace
@@ -33,9 +33,9 @@ def _handle_known(exc: Exception) -> dict | None:
 # Server factory                                                       #
 # ------------------------------------------------------------------ #
 
-def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Embedder, Tokenizer]:
+def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Any, Tokenizer]:
     store = SQLiteStore(db_path)
-    embedder = Embedder()
+    embedder = make_embedder()
     tokenizer = Tokenizer()
 
     app = Server("ocp-server")
