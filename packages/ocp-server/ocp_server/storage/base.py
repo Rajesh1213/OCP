@@ -107,9 +107,32 @@ class BaseStore(ABC):
     @abstractmethod
     async def purge_expired_state(self) -> int: ...
 
+    @abstractmethod
+    async def purge_expired_state_entries(self) -> int: ...
+
+    @abstractmethod
+    async def purge_expired_sessions_with_ids(self) -> list[tuple[str, str]]: ...
+
     # --- checkpoint restore ---
     @abstractmethod
     async def copy_session_state(self, src_session_id: str, dst_session_id: str) -> int: ...
 
     @abstractmethod
     async def get_checkpoint(self, checkpoint_id: str) -> dict | None: ...
+
+    # --- chunk helpers for hash-mismatch detection (§6.1 trigger 3) ---
+    @abstractmethod
+    async def get_active_chunk_ids_for_uri(self, workspace_id: str, uri: str) -> list[str]:
+        """Return non-stale chunk IDs whose source_uri matches exactly."""
+        ...
+
+    @abstractmethod
+    async def mark_chunks_stale(self, chunk_ids: list[str]) -> None:
+        """Bulk-mark the given chunk IDs as stale."""
+        ...
+
+    # --- session GC (§4.4 MUST) ---
+    @abstractmethod
+    async def delete_session_state(self, session_id: str) -> int:
+        """Delete all state entries scoped to session_id. Returns deleted count."""
+        ...

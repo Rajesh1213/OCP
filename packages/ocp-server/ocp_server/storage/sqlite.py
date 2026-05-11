@@ -534,7 +534,9 @@ class SQLiteStore(BaseStore):
             db = await self._conn()
             # R2: monotonic_ns prefix guarantees lexicographic = chronological order,
             # making event_id > ? comparisons and since= replay correct (§7.1).
-            event_id = f"evt_{time.monotonic_ns():020d}_{uuid.uuid4().hex[:6]}"
+            # time.time_ns() is wall-clock — survives server restarts.
+            # monotonic_ns resets per-process so old since= values would miss events.
+            event_id = f"evt_{time.time_ns():020d}_{uuid.uuid4().hex[:6]}"
             await db.execute(
                 """INSERT INTO events
                    (event_id,subscription_id,workspace_id,type,payload,timestamp)
@@ -588,6 +590,13 @@ class SQLiteStore(BaseStore):
     # ------------------------------------------------------------------ #
 
     async def purge_expired_state(self) -> int:
+        """Legacy: purge both entries and sessions. Kept for compatibility."""
+        entries = await self.purge_expired_state_entries()
+        sessions = await self.purge_expired_sessions_with_ids()
+        return entries + len(sessions)
+
+    async def purge_expired_state_entries(self) -> int:
+        """Delete individual state entries whose ttl_seconds has elapsed."""
         async with self._write_lock:
             db = await self._conn()
             async with db.execute(
@@ -596,16 +605,25 @@ class SQLiteStore(BaseStore):
                      AND ((julianday('now') - julianday(updated_at)) * 86400) > ttl_seconds
                    RETURNING 1"""
             ) as cur:
-                expired_entries = len(await cur.fetchall())
+                rows = await cur.fetchall()
+            await db.commit()
+        return len(rows)
+
+    async def purge_expired_sessions_with_ids(self) -> list[tuple[str, str]]:
+        """Close TTL-expired sessions; return list of (session_id, workspace_id).
+        §7.2 — caller uses these to emit session.closed{reason=ttl} events.
+        """
+        async with self._write_lock:
+            db = await self._conn()
             async with db.execute(
                 """UPDATE sessions SET closed=1
                    WHERE ttl_seconds IS NOT NULL AND closed=0
                      AND ((julianday('now') - julianday(created_at)) * 86400) > ttl_seconds
-                   RETURNING session_id"""
+                   RETURNING session_id, workspace_id"""
             ) as cur:
-                expired_sessions = len(await cur.fetchall())
+                rows = await cur.fetchall()
             await db.commit()
-        return expired_entries + expired_sessions
+        return [(r[0], r[1]) for r in rows]
 
     # ------------------------------------------------------------------ #
     # Checkpoint / restore                                                 #
@@ -657,6 +675,42 @@ class SQLiteStore(BaseStore):
                 count += 1
             await db.commit()
         return count
+
+    async def get_active_chunk_ids_for_uri(
+        self, workspace_id: str, uri: str
+    ) -> list[str]:
+        """§6.1 trigger 3 — find non-stale chunks for a URI before reindexing."""
+        db = await self._conn()
+        async with db.execute(
+            "SELECT chunk_id FROM chunks WHERE workspace_id=? AND source_uri=? AND stale=0",
+            (workspace_id, uri),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [r[0] for r in rows]
+
+    async def mark_chunks_stale(self, chunk_ids: list[str]) -> None:
+        """§6.1 trigger 3 — bulk-stale chunks whose content_hash changed."""
+        if not chunk_ids:
+            return
+        async with self._write_lock:
+            db = await self._conn()
+            placeholders = ",".join("?" * len(chunk_ids))
+            await db.execute(
+                f"UPDATE chunks SET stale=1 WHERE chunk_id IN ({placeholders})",
+                chunk_ids,
+            )
+            await db.commit()
+
+    async def delete_session_state(self, session_id: str) -> int:
+        """§4.4 MUST: GC all state scoped to a session after session.close."""
+        async with self._write_lock:
+            db = await self._conn()
+            async with db.execute(
+                "DELETE FROM state WHERE session_id=? RETURNING 1", (session_id,)
+            ) as cur:
+                rows = await cur.fetchall()
+            await db.commit()
+        return len(rows)
 
 
 # ------------------------------------------------------------------ #

@@ -52,6 +52,10 @@ class Chunk(BaseModel):
     version: int = 1
 
 
+_MAX_KEY_BYTES = 256
+_MAX_VALUE_BYTES = 1 * 1024 * 1024  # 1 MiB
+
+
 class StateEntry(BaseModel):
     key: str
     value: Any
@@ -71,6 +75,16 @@ class StateEntry(BaseModel):
             raise ValueError("session_id required for session scope")
         if self.scope in (Scope.session, Scope.global_) and not self.workspace_id:
             raise ValueError("workspace_id required for session/global scope")
+        # §3.2 — key: max 256 bytes; value: max 1 MiB
+        if len(self.key.encode()) > _MAX_KEY_BYTES:
+            raise ValueError(f"key exceeds {_MAX_KEY_BYTES} bytes")
+        import json as _json
+        try:
+            encoded = _json.dumps(self.value).encode()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"value is not JSON-serialisable: {exc}") from exc
+        if len(encoded) > _MAX_VALUE_BYTES:
+            raise ValueError(f"value exceeds {_MAX_VALUE_BYTES} bytes (1 MiB)")
         return self
 
 

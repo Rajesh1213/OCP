@@ -70,7 +70,7 @@ async def _send_ocp_notification(app: Server, envelope: dict) -> None:
 # Server factory                                                       #
 # ------------------------------------------------------------------ #
 
-def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Any, Tokenizer]:
+def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Any, Tokenizer, Any]:
     store = SQLiteStore(db_path)
     embedder = make_embedder()
     tokenizer = Tokenizer()
@@ -78,10 +78,11 @@ def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Any, Tok
     app = Server(
         name="ocp-server",
         version="0.1.0",
-        # B9: document k cap as required by §4.2
+        # §10: core+coordination+events implemented; §8 auth/isolation not implemented
+        # so we advertise core+coordination, not full.
         instructions=(
-            "OCP/0.1 reference server — profiles: ocp/0.1 — conformance: full. "
-            "context.search: k is capped at 20. "
+            "OCP/0.1 reference server — profiles: ocp/0.1 — conformance: core+coordination. "
+            "context.search: k capped at 20 (§4.2). "
             "Embedding backend: OCP_EMBEDDER=hash|fastembed|openai (default: hash)."
         ),
     )
@@ -109,7 +110,7 @@ def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Any, Tok
                 raise
         return [TextContent(type="text", text=json.dumps(result))]
 
-    return app, store, embedder, tokenizer
+    return app, store, embedder, tokenizer, _emit
 
 
 # ------------------------------------------------------------------ #
@@ -144,23 +145,39 @@ async def _dispatch(
             paths = args.get("paths")
             wait = args.get("wait", True)
 
-            async def _do_index() -> None:
-                result = await index_workspace(store, embedder, ws_id, root_uri, paths)
-                chunk_ids = []  # full scan — collect indexed ids for event
-                if result["indexed"] > 0:
-                    chunks_page, _ = await store.list_chunks(ws_id, None, None)
-                    chunk_ids = [c.id for c in chunks_page]
-                await emit(ws_id, "chunk.indexed", {"chunk_ids": chunk_ids})
+            async def _do_index(wid: str = ws_id, ruri: str = root_uri) -> None:
+                # §7.2 index.progress callback
+                async def _progress(frac: float) -> None:
+                    await emit(wid, "index.progress",
+                               {"workspace_id": wid, "progress": round(frac, 3)})
+
+                result, stale_ids = await index_workspace(
+                    store, embedder, wid, ruri, paths, progress_cb=_progress
+                )
+                # §6.1 trigger 3 — emit chunk.invalidated for hash-mismatched chunks
+                if stale_ids:
+                    await emit(wid, "chunk.invalidated",
+                               {"chunk_ids": stale_ids, "reason": "file_changed"})
+                # §7.2 chunk.indexed
+                chunks_page, _ = await store.list_chunks(wid, None, None)
+                await emit(wid, "chunk.indexed",
+                           {"chunk_ids": [c.id for c in chunks_page[:200]]})
 
             if wait is False:
-                # §4.1 — async mode: return immediately, index in background
+                # §4.1 — async mode: return immediately, index in background task
                 asyncio.create_task(_do_index())
                 return {"indexed": 0, "skipped": 0, "duration_ms": 0, "async": True}
             else:
-                result = await index_workspace(store, embedder, ws_id, root_uri, paths)
+                async def _noop(_: float) -> None: pass
+                result, stale_ids = await index_workspace(
+                    store, embedder, ws_id, root_uri, paths, progress_cb=_noop
+                )
+                if stale_ids:
+                    await emit(ws_id, "chunk.invalidated",
+                               {"chunk_ids": stale_ids, "reason": "file_changed"})
                 chunks_page, _ = await store.list_chunks(ws_id, None, None)
-                chunk_ids = [c.id for c in chunks_page[:100]]
-                await emit(ws_id, "chunk.indexed", {"chunk_ids": chunk_ids})
+                await emit(ws_id, "chunk.indexed",
+                           {"chunk_ids": [c.id for c in chunks_page[:200]]})
                 return result
 
         case "workspace.invalidate":
@@ -347,14 +364,24 @@ async def _dispatch(
 # Background tasks                                                     #
 # ------------------------------------------------------------------ #
 
-async def _ttl_cleanup_loop(store: SQLiteStore) -> None:
-    """§5.2 — Purge expired state entries and sessions every 60 s."""
+async def _ttl_cleanup_loop(store: SQLiteStore, emit: Any) -> None:
+    """§5.2 — Purge expired state entries and sessions every 60 s.
+    §7.2 — Emits session.closed with reason=ttl for each expired session.
+    """
     while True:
         await asyncio.sleep(60)
         try:
-            purged = await store.purge_expired_state()
-            if purged:
-                log.info("TTL cleanup: purged %d expired entries/sessions", purged)
+            expired_sessions = await store.purge_expired_sessions_with_ids()
+            for sid, ws_id in expired_sessions:
+                await store.delete_session_state(sid)
+                if ws_id:
+                    await emit(ws_id, "session.closed",
+                               {"session_id": sid, "reason": "ttl"})
+            purged_entries = await store.purge_expired_state_entries()
+            total = len(expired_sessions) + purged_entries
+            if total:
+                log.info("TTL cleanup: %d sessions, %d entries purged",
+                         len(expired_sessions), purged_entries)
         except Exception as exc:
             log.warning("TTL cleanup error: %s", exc)
 
@@ -554,12 +581,12 @@ async def _main() -> None:
     db_path = os.environ.get("OCP_DB_PATH", "ocp.db")
     watch = os.environ.get("OCP_WATCH", "1") != "0"
 
-    app, store, embedder, tokenizer = build_server(db_path)
+    app, store, embedder, tokenizer, emit_fn = build_server(db_path)
     await store.setup()
 
     # Start background tasks
-    ttl_task = asyncio.create_task(_ttl_cleanup_loop(store))
-    watch_task = asyncio.create_task(_file_watch_loop(store, embedder, _emit)) if watch else None
+    ttl_task = asyncio.create_task(_ttl_cleanup_loop(store, emit_fn))
+    watch_task = asyncio.create_task(_file_watch_loop(store, embedder, emit_fn)) if watch else None
 
     try:
         async with stdio_server() as (read_stream, write_stream):

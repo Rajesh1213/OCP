@@ -26,6 +26,9 @@ async def session_open(
 
 async def session_close(store: BaseStore, session_id: str) -> dict:
     closed = await store.session_close(session_id)
+    if closed:
+        # §4.4 MUST: GC session-scoped state after close
+        await store.delete_session_state(session_id)
     return {"closed": closed}
 
 
@@ -36,8 +39,12 @@ async def session_handoff(
     to_agent: str,
     message: object,
 ) -> dict:
+    # §3.3: "first OCP call that references a previously unseen session_id MUST
+    # materialise that session" — do NOT reject unknown session_ids.
     if not await store.session_exists(session_id):
-        raise SessionNotFoundError(session_id)
+        # Auto-materialise; workspace_id unknown at this point, use empty string
+        # (session.open should be called first in well-formed flows).
+        await store.session_open("", session_id, None, {})
 
     handoff_id = f"ho_{uuid.uuid4().hex[:12]}"
 
