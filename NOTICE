@@ -1,0 +1,105 @@
+Open Context Protocol (OCP) Reference Implementation
+Copyright 2026 Rajesh Banoth
+
+This product includes software developed as part of the Open Context Protocol
+project (https://github.com/Rajesh1213/OCP).
+
+This project implements a profile of the Model Context Protocol designed by
+Anthropic. The Model Context Protocol specification is published at
+https://modelcontextprotocol.io and is referenced openly; this project is not
+affiliated with or endorsed by Anthropic.
+
+------------------------------------------------------------------------
+
+Third-Party Dependencies
+
+The following direct dependencies are used by this project. Each is used under
+the license indicated. Transitive dependencies are not listed here; see the
+uv.lock file at the repository root for the full resolved dependency graph.
+
+------------------------------------------------------------------------
+
+MIT License
+
+mcp >= 1.0
+  Model Context Protocol Python SDK.
+  Copyright (c) Anthropic, PBC.
+  https://github.com/modelcontextprotocol/python-sdk
+
+pydantic >= 2.7
+  Data validation using Python type annotations.
+  Copyright (c) Samuel Colvin and contributors.
+  https://github.com/pydantic/pydantic
+
+aiosqlite >= 0.20
+  Async bridge for the standard sqlite3 module.
+  Copyright (c) John Reese and contributors.
+  https://github.com/omnilib/aiosqlite
+
+tiktoken >= 0.7
+  Fast BPE tokeniser for use with OpenAI models.
+  Copyright (c) OpenAI.
+  https://github.com/openai/tiktoken
+
+watchfiles >= 0.22
+  Simple, modern, and high-performance file watching.
+  Copyright (c) Samuel Colvin and contributors.
+  https://github.com/samuelcolvin/watchfiles
+
+pytest >= 8.0
+  The pytest testing framework.
+  Copyright (c) Holger Krekel and pytest contributors.
+  https://github.com/pytest-dev/pytest
+
+httpx >= 0.27
+  A next-generation HTTP client for Python.
+  Copyright (c) Tom Christie and contributors.
+  https://github.com/encode/httpx
+
+ruff >= 0.4
+  An extremely fast Python linter and formatter.
+  Copyright (c) Astral Software Inc.
+  https://github.com/astral-sh/ruff
+
+mypy >= 1.10
+  Optional static typing for Python.
+  Copyright (c) Jukka Lehtosalo and mypy contributors.
+  https://github.com/python/mypy
+
+hatchling
+  Modern, extensible Python build backend.
+  Copyright (c) Ofek Lev and contributors.
+  https://github.com/pypa/hatch
+
+------------------------------------------------------------------------
+
+Apache License 2.0
+
+aiofiles >= 23.2
+  File support for asyncio.
+  Copyright (c) Tin Tvrtković and contributors.
+  https://github.com/Tinche/aiofiles
+
+pytest-asyncio >= 0.23
+  Pytest support for asyncio.
+  Copyright (c) pytest-asyncio contributors.
+  https://github.com/pytest-dev/pytest-asyncio
+
+------------------------------------------------------------------------
+
+BSD-3-Clause License
+
+numpy >= 1.26
+  Fundamental package for scientific computing with Python.
+  Copyright (c) NumPy Developers.
+  https://github.com/numpy/numpy
+
+uvicorn >= 0.29
+  An ASGI web server implementation for Python.
+  Copyright (c) Tom Christie and contributors.
+  https://github.com/encode/uvicorn
+
+------------------------------------------------------------------------
+
+This software is provided "AS IS" without warranty of any kind. See the LICENSE
+file for the full Apache License 2.0 terms.
