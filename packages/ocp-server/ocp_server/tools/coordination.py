@@ -74,8 +74,23 @@ async def session_checkpoint(
 
 
 async def session_restore(store: BaseStore, checkpoint_id: str) -> dict:
-    # Restore creates a new session, copying checkpoint state
+    """Restore a session from a checkpoint — §4.4."""
+    ckpt = await store.get_checkpoint(checkpoint_id)
+    if ckpt is None:
+        raise SessionNotFoundError(f"checkpoint:{checkpoint_id}")
+
+    src_session_id = ckpt["session_id"]
     new_session_id = str(uuid.uuid4())
+
+    # Materialise the new session in the same workspace
+    src_row = await store.session_exists(src_session_id)
+    # Best-effort: get workspace_id from source state entries
+    entries, _ = await store.state_list(None, None, None, src_session_id, None, None)
+    workspace_id = entries[0].workspace_id if entries else None
+
+    await store.session_open(workspace_id or "", new_session_id, None, {})
+    await store.copy_session_state(src_session_id, new_session_id)
+
     return {"session_id": new_session_id}
 
 

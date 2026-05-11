@@ -2,17 +2,26 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import (
+    LoggingMessageNotification,
+    LoggingMessageNotificationParams,
+    TextContent,
+    Tool,
+)
 
 from ocp_server.embedder import make_embedder, Tokenizer
 from ocp_server.indexer import index_workspace
 from ocp_server.storage.sqlite import SQLiteStore
 from ocp_server.tools import coordination, events, retrieval, state, workspace
+
+log = logging.getLogger(__name__)
+
 
 # ------------------------------------------------------------------ #
 # Error helper                                                         #
@@ -30,6 +39,34 @@ def _handle_known(exc: Exception) -> dict | None:
 
 
 # ------------------------------------------------------------------ #
+# Notification helper                                                  #
+# ------------------------------------------------------------------ #
+
+async def _send_ocp_notification(app: Server, envelope: dict) -> None:
+    """Send an OCP event as an MCP log notification (info level).
+
+    Falls back silently if not inside a request context — events are
+    at-most-once per §7.3, so loss during teardown is acceptable.
+    """
+    try:
+        ctx = app.request_context
+        await ctx.session.send_notification(
+            LoggingMessageNotification(
+                method="notifications/message",
+                params=LoggingMessageNotificationParams(
+                    level="info",
+                    logger="ocp.events",
+                    data=envelope,
+                ),
+            )
+        )
+    except LookupError:
+        pass  # not inside a request context
+    except Exception as exc:
+        log.debug("Could not send OCP notification: %s", exc)
+
+
+# ------------------------------------------------------------------ #
 # Server factory                                                       #
 # ------------------------------------------------------------------ #
 
@@ -44,6 +81,12 @@ def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Any, Tok
         instructions="OCP/0.1 reference server — profiles: ocp/0.1 — conformance: full",
     )
 
+    # Convenience: emit an OCP event to all subscribers and optionally notify.
+    async def _emit(workspace_id: str, event_type: str, payload: dict) -> None:
+        async def _notify_cb(subscription_id: str, envelope: dict) -> None:
+            await _send_ocp_notification(app, envelope)
+        await events.emit_event(store, workspace_id, event_type, payload, _notify_cb)
+
     @app.list_tools()
     async def list_tools() -> list[Tool]:
         return _ALL_TOOLS
@@ -52,7 +95,7 @@ def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Any, Tok
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         import json
         try:
-            result = await _dispatch(name, arguments, store, embedder, tokenizer)
+            result = await _dispatch(name, arguments, store, embedder, tokenizer, _emit)
         except Exception as exc:
             err = _handle_known(exc)
             if err:
@@ -64,15 +107,21 @@ def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Any, Tok
     return app, store, embedder, tokenizer
 
 
+# ------------------------------------------------------------------ #
+# Dispatch                                                             #
+# ------------------------------------------------------------------ #
+
 async def _dispatch(
     name: str,
     args: dict,
     store: SQLiteStore,
-    embedder: Embedder,
+    embedder: Any,
     tokenizer: Tokenizer,
+    emit: Any,
 ) -> Any:
     match name:
-        # --- workspace ---
+
+        # ── workspace ──────────────────────────────────────────────
         case "workspace.register":
             return await workspace.workspace_register(
                 store,
@@ -80,26 +129,50 @@ async def _dispatch(
                 name=args.get("name"),
                 metadata=args.get("metadata", {}),
             )
+
         case "workspace.index":
             ws_id = args["workspace_id"]
-            ws_row = await store._conn()
-            async with ws_row.execute("SELECT root_uri FROM workspaces WHERE workspace_id=?", (ws_id,)) as cur:
-                row = await cur.fetchone()
-            if row is None:
+            root_uri = await store.get_workspace_root(ws_id)
+            if root_uri is None:
                 return _ocp_error("WORKSPACE_NOT_FOUND", f"Workspace not found: {ws_id}")
-            result = await index_workspace(
-                store, embedder, ws_id, row["root_uri"],
-                paths=args.get("paths"),
-            )
-            return result
+
+            paths = args.get("paths")
+            wait = args.get("wait", True)
+
+            async def _do_index() -> None:
+                result = await index_workspace(store, embedder, ws_id, root_uri, paths)
+                chunk_ids = []  # full scan — collect indexed ids for event
+                if result["indexed"] > 0:
+                    chunks_page, _ = await store.list_chunks(ws_id, None, None)
+                    chunk_ids = [c.id for c in chunks_page]
+                await emit(ws_id, "chunk.indexed", {"chunk_ids": chunk_ids})
+
+            if wait is False:
+                # §4.1 — async mode: return immediately, index in background
+                asyncio.create_task(_do_index())
+                return {"indexed": 0, "skipped": 0, "duration_ms": 0, "async": True}
+            else:
+                result = await index_workspace(store, embedder, ws_id, root_uri, paths)
+                chunks_page, _ = await store.list_chunks(ws_id, None, None)
+                chunk_ids = [c.id for c in chunks_page[:100]]
+                await emit(ws_id, "chunk.indexed", {"chunk_ids": chunk_ids})
+                return result
+
         case "workspace.invalidate":
-            return await workspace.workspace_invalidate(store, args["workspace_id"], args["paths"])
+            ws_id = args["workspace_id"]
+            paths = args["paths"]
+            result = await workspace.workspace_invalidate(store, ws_id, paths)
+            # §6.2 — emit chunk.invalidated
+            await emit(ws_id, "chunk.invalidated",
+                       {"chunk_ids": [], "reason": "explicit", "paths": paths})
+            return result
+
         case "workspace.list_chunks":
             return await workspace.workspace_list_chunks(
                 store, args["workspace_id"], args.get("filters"), args.get("cursor")
             )
 
-        # --- retrieval ---
+        # ── retrieval ──────────────────────────────────────────────
         case "context.search":
             return await retrieval.context_search(
                 store, embedder,
@@ -108,8 +181,10 @@ async def _dispatch(
                 k=args.get("k", 5),
                 filters=args.get("filters"),
             )
+
         case "context.get_chunk":
             return await retrieval.context_get_chunk(store, args["chunk_id"])
+
         case "context.pack":
             return await retrieval.context_pack(
                 store, embedder, tokenizer,
@@ -119,19 +194,32 @@ async def _dispatch(
                 include_state=args.get("include_state", False),
             )
 
-        # --- state ---
+        # ── state ──────────────────────────────────────────────────
         case "state.set":
-            return await state.state_set(
+            ws_id = args.get("workspace_id")
+            sess_id = args.get("session_id")
+            agent_id = args.get("agent_id")
+            scope = args["scope"]
+            result = await state.state_set(
                 store,
                 key=args["key"],
                 value=args["value"],
-                scope=args["scope"],
-                workspace_id=args.get("workspace_id"),
-                session_id=args.get("session_id"),
-                agent_id=args.get("agent_id"),
+                scope=scope,
+                workspace_id=ws_id,
+                session_id=sess_id,
+                agent_id=agent_id,
                 ttl_seconds=args.get("ttl_seconds"),
                 if_version=args.get("if_version"),
             )
+            # §7.2 — emit state.changed
+            if ws_id:
+                await emit(ws_id, "state.changed", {
+                    "key": args["key"], "scope": scope,
+                    "session_id": sess_id, "agent_id": agent_id,
+                    "version": result["version"],
+                })
+            return result
+
         case "state.get":
             return await state.state_get(
                 store,
@@ -141,6 +229,7 @@ async def _dispatch(
                 session_id=args.get("session_id"),
                 agent_id=args.get("agent_id"),
             )
+
         case "state.list":
             return await state.state_list(
                 store,
@@ -151,18 +240,30 @@ async def _dispatch(
                 agent_id=args.get("agent_id"),
                 cursor=args.get("cursor"),
             )
+
         case "state.delete":
-            return await state.state_delete(
+            ws_id = args.get("workspace_id")
+            scope = args["scope"]
+            sess_id = args.get("session_id")
+            agent_id = args.get("agent_id")
+            result = await state.state_delete(
                 store,
                 key=args["key"],
-                scope=args["scope"],
-                workspace_id=args.get("workspace_id"),
-                session_id=args.get("session_id"),
-                agent_id=args.get("agent_id"),
+                scope=scope,
+                workspace_id=ws_id,
+                session_id=sess_id,
+                agent_id=agent_id,
                 if_version=args.get("if_version"),
             )
+            if ws_id and result["deleted"]:
+                await emit(ws_id, "state.changed", {
+                    "key": args["key"], "scope": scope,
+                    "session_id": sess_id, "agent_id": agent_id,
+                    "version": None, "deleted": True,
+                })
+            return result
 
-        # --- coordination ---
+        # ── coordination ───────────────────────────────────────────
         case "session.open":
             return await coordination.session_open(
                 store,
@@ -171,16 +272,40 @@ async def _dispatch(
                 ttl_seconds=args.get("ttl_seconds"),
                 metadata=args.get("metadata", {}),
             )
+
         case "session.close":
-            return await coordination.session_close(store, args["session_id"])
+            sess_id = args["session_id"]
+            result = await coordination.session_close(store, sess_id)
+            # Emit session.closed for all workspaces that have subscribers
+            # (session may span any workspace; emit best-effort)
+            all_ws = await store.list_all_workspaces()
+            for ws in all_ws:
+                await emit(ws["workspace_id"], "session.closed",
+                           {"session_id": sess_id, "reason": "explicit"})
+            return result
+
         case "session.handoff":
-            return await coordination.session_handoff(
+            sess_id = args["session_id"]
+            from_agent = args["from_agent"]
+            to_agent = args["to_agent"]
+            result = await coordination.session_handoff(
                 store,
-                session_id=args["session_id"],
-                from_agent=args["from_agent"],
-                to_agent=args["to_agent"],
+                session_id=sess_id,
+                from_agent=from_agent,
+                to_agent=to_agent,
                 message=args["message"],
             )
+            # §7.2 — emit session.handoff event
+            all_ws = await store.list_all_workspaces()
+            for ws in all_ws:
+                await emit(ws["workspace_id"], "session.handoff", {
+                    "session_id": sess_id,
+                    "from_agent": from_agent,
+                    "to_agent": to_agent,
+                    "handoff_id": result["handoff_id"],
+                })
+            return result
+
         case "session.checkpoint":
             return await coordination.session_checkpoint(
                 store,
@@ -188,10 +313,11 @@ async def _dispatch(
                 label=args["label"],
                 include_state=args.get("include_state", False),
             )
+
         case "session.restore":
             return await coordination.session_restore(store, args["checkpoint_id"])
 
-        # --- events ---
+        # ── events ─────────────────────────────────────────────────
         case "events.subscribe":
             return await events.events_subscribe(
                 store,
@@ -200,6 +326,7 @@ async def _dispatch(
                 session_id=args.get("session_id"),
                 since=args.get("since"),
             )
+
         case "events.unsubscribe":
             return await events.events_unsubscribe(store, args["subscription_id"])
 
@@ -208,100 +335,178 @@ async def _dispatch(
 
 
 # ------------------------------------------------------------------ #
+# Background tasks                                                     #
+# ------------------------------------------------------------------ #
+
+async def _ttl_cleanup_loop(store: SQLiteStore) -> None:
+    """§5.2 — Purge expired state entries and sessions every 60 s."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            purged = await store.purge_expired_state()
+            if purged:
+                log.info("TTL cleanup: purged %d expired entries/sessions", purged)
+        except Exception as exc:
+            log.warning("TTL cleanup error: %s", exc)
+
+
+async def _file_watch_loop(store: SQLiteStore, embedder: Any) -> None:
+    """§6.1 — Watch all registered workspace roots for file changes."""
+    try:
+        from watchfiles import awatch
+    except ImportError:
+        log.warning("watchfiles not available — file watching disabled")
+        return
+
+    workspaces = await store.list_all_workspaces()
+    if not workspaces:
+        return
+
+    roots = [ws["root_uri"].removeprefix("file://") for ws in workspaces]
+    ws_by_root = {ws["root_uri"].removeprefix("file://"): ws["workspace_id"]
+                  for ws in workspaces}
+
+    log.info("File watcher started for: %s", roots)
+    try:
+        async for changes in awatch(*roots):
+            for _change_type, path in changes:
+                for root, ws_id in ws_by_root.items():
+                    if path.startswith(root):
+                        rel = path[len(root):].lstrip("/")
+                        count = await store.invalidate_chunks_by_path(ws_id, [path])
+                        if count:
+                            log.info("Auto-invalidated %d chunks for %s", count, path)
+                        break
+    except Exception as exc:
+        log.warning("File watcher stopped: %s", exc)
+
+
+# ------------------------------------------------------------------ #
 # Tool schemas                                                         #
 # ------------------------------------------------------------------ #
 
 _ALL_TOOLS: list[Tool] = [
     # workspace
-    Tool(name="workspace.register", description="Register (or return) a workspace root. §4.1",
+    Tool(name="workspace.register",
+         description="Register (or return) a workspace root. §4.1",
          inputSchema={"type": "object", "required": ["root_uri"],
                       "properties": {"root_uri": {"type": "string"},
                                      "name": {"type": "string"},
                                      "metadata": {"type": "object"}}}),
-    Tool(name="workspace.index", description="Trigger indexing of a workspace. §4.1",
+    Tool(name="workspace.index",
+         description="Trigger indexing of a workspace. §4.1",
          inputSchema={"type": "object", "required": ["workspace_id"],
                       "properties": {"workspace_id": {"type": "string"},
                                      "paths": {"type": "array", "items": {"type": "string"}},
-                                     "wait": {"type": "boolean"}}}),
-    Tool(name="workspace.invalidate", description="Mark chunks from paths as stale. §4.1",
+                                     "wait": {"type": "boolean",
+                                              "description": "false = return immediately, index in background"}}}),
+    Tool(name="workspace.invalidate",
+         description="Mark chunks from paths as stale, emits chunk.invalidated. §4.1 §6.2",
          inputSchema={"type": "object", "required": ["workspace_id", "paths"],
                       "properties": {"workspace_id": {"type": "string"},
                                      "paths": {"type": "array", "items": {"type": "string"}}}}),
-    Tool(name="workspace.list_chunks", description="List chunks in a workspace (OPTIONAL). §4.1",
+    Tool(name="workspace.list_chunks",
+         description="List chunks in a workspace (OPTIONAL). §4.1",
          inputSchema={"type": "object", "required": ["workspace_id"],
                       "properties": {"workspace_id": {"type": "string"},
                                      "filters": {"type": "object"},
                                      "cursor": {"type": "string"}}}),
     # retrieval
-    Tool(name="context.search", description="Semantic search over a workspace. §4.2",
+    Tool(name="context.search",
+         description="Semantic search over a workspace. §4.2",
          inputSchema={"type": "object", "required": ["workspace_id", "query"],
                       "properties": {"workspace_id": {"type": "string"},
                                      "query": {"type": "string"},
                                      "k": {"type": "integer", "default": 5},
                                      "filters": {"type": "object"}}}),
-    Tool(name="context.get_chunk", description="Retrieve a chunk by ID. §4.2",
+    Tool(name="context.get_chunk",
+         description="Retrieve a chunk by ID. Returns STALE if invalidated. §4.2",
          inputSchema={"type": "object", "required": ["chunk_id"],
                       "properties": {"chunk_id": {"type": "string"}}}),
-    Tool(name="context.pack", description="Assemble a context bundle under a token budget. §4.2",
+    Tool(name="context.pack",
+         description="Assemble a context bundle under a token budget. §4.2",
          inputSchema={"type": "object", "required": ["workspace_id", "intent", "budget_tokens"],
                       "properties": {"workspace_id": {"type": "string"},
                                      "intent": {"type": "string"},
                                      "budget_tokens": {"type": "integer"},
                                      "include_state": {"type": "boolean", "default": False}}}),
     # state
-    Tool(name="state.set", description="Write a state entry. §4.3",
+    Tool(name="state.set",
+         description="Write a state entry; emits state.changed. §4.3",
          inputSchema={"type": "object", "required": ["key", "value", "scope"],
                       "properties": {"key": {"type": "string"}, "value": {},
                                      "scope": {"type": "string", "enum": ["agent", "session", "global"]},
-                                     "workspace_id": {"type": "string"}, "session_id": {"type": "string"},
-                                     "agent_id": {"type": "string"}, "ttl_seconds": {"type": "integer"},
+                                     "workspace_id": {"type": "string"},
+                                     "session_id": {"type": "string"},
+                                     "agent_id": {"type": "string"},
+                                     "ttl_seconds": {"type": "integer"},
                                      "if_version": {"type": "integer"}}}),
-    Tool(name="state.get", description="Read a state entry (scope-resolved). §4.3 §5.1",
+    Tool(name="state.get",
+         description="Read a state entry (scope-resolved agent→session→global). §4.3 §5.1",
          inputSchema={"type": "object", "required": ["key"],
                       "properties": {"key": {"type": "string"},
                                      "scope": {"type": "string", "enum": ["agent", "session", "global"]},
-                                     "workspace_id": {"type": "string"}, "session_id": {"type": "string"},
+                                     "workspace_id": {"type": "string"},
+                                     "session_id": {"type": "string"},
                                      "agent_id": {"type": "string"}}}),
-    Tool(name="state.list", description="List state entries with optional prefix filter. §4.3",
-         inputSchema={"type": "object", "properties": {
-             "prefix": {"type": "string"}, "scope": {"type": "string"},
-             "workspace_id": {"type": "string"}, "session_id": {"type": "string"},
-             "agent_id": {"type": "string"}, "cursor": {"type": "string"}}}),
-    Tool(name="state.delete", description="Delete a state entry. §4.3",
+    Tool(name="state.list",
+         description="List state entries with optional prefix filter. §4.3",
+         inputSchema={"type": "object",
+                      "properties": {"prefix": {"type": "string"},
+                                     "scope": {"type": "string"},
+                                     "workspace_id": {"type": "string"},
+                                     "session_id": {"type": "string"},
+                                     "agent_id": {"type": "string"},
+                                     "cursor": {"type": "string"}}}),
+    Tool(name="state.delete",
+         description="Delete a state entry; emits state.changed. §4.3",
          inputSchema={"type": "object", "required": ["key", "scope"],
                       "properties": {"key": {"type": "string"},
                                      "scope": {"type": "string", "enum": ["agent", "session", "global"]},
-                                     "workspace_id": {"type": "string"}, "session_id": {"type": "string"},
-                                     "agent_id": {"type": "string"}, "if_version": {"type": "integer"}}}),
+                                     "workspace_id": {"type": "string"},
+                                     "session_id": {"type": "string"},
+                                     "agent_id": {"type": "string"},
+                                     "if_version": {"type": "integer"}}}),
     # coordination
-    Tool(name="session.open", description="Open or materialize a session. §4.4",
+    Tool(name="session.open",
+         description="Open or materialise a session. §4.4",
          inputSchema={"type": "object", "required": ["workspace_id"],
                       "properties": {"workspace_id": {"type": "string"},
                                      "session_id": {"type": "string"},
                                      "ttl_seconds": {"type": "integer"},
                                      "metadata": {"type": "object"}}}),
-    Tool(name="session.close", description="Close a session. §4.4",
+    Tool(name="session.close",
+         description="Close a session; emits session.closed. §4.4",
          inputSchema={"type": "object", "required": ["session_id"],
                       "properties": {"session_id": {"type": "string"}}}),
-    Tool(name="session.handoff", description="Pass control between agents. §4.4",
-         inputSchema={"type": "object", "required": ["session_id", "from_agent", "to_agent", "message"],
-                      "properties": {"session_id": {"type": "string"}, "from_agent": {"type": "string"},
-                                     "to_agent": {"type": "string"}, "message": {}}}),
-    Tool(name="session.checkpoint", description="Create a named session checkpoint. §4.4",
+    Tool(name="session.handoff",
+         description="Pass control between agents; emits session.handoff. §4.4",
+         inputSchema={"type": "object",
+                      "required": ["session_id", "from_agent", "to_agent", "message"],
+                      "properties": {"session_id": {"type": "string"},
+                                     "from_agent": {"type": "string"},
+                                     "to_agent": {"type": "string"},
+                                     "message": {}}}),
+    Tool(name="session.checkpoint",
+         description="Create a named session checkpoint. §4.4",
          inputSchema={"type": "object", "required": ["session_id", "label"],
-                      "properties": {"session_id": {"type": "string"}, "label": {"type": "string"},
+                      "properties": {"session_id": {"type": "string"},
+                                     "label": {"type": "string"},
                                      "include_state": {"type": "boolean"}}}),
-    Tool(name="session.restore", description="Restore a session from a checkpoint. §4.4",
+    Tool(name="session.restore",
+         description="Restore a session from a checkpoint, copying state. §4.4",
          inputSchema={"type": "object", "required": ["checkpoint_id"],
                       "properties": {"checkpoint_id": {"type": "string"}}}),
     # events
-    Tool(name="events.subscribe", description="Subscribe to workspace events. §4.5",
+    Tool(name="events.subscribe",
+         description="Subscribe to workspace events; supports replay via 'since'. §4.5 §7",
          inputSchema={"type": "object", "required": ["workspace_id"],
                       "properties": {"workspace_id": {"type": "string"},
                                      "types": {"type": "array", "items": {"type": "string"}},
                                      "session_id": {"type": "string"},
                                      "since": {"type": "string"}}}),
-    Tool(name="events.unsubscribe", description="Unsubscribe from events. §4.5",
+    Tool(name="events.unsubscribe",
+         description="Unsubscribe from events. §4.5",
          inputSchema={"type": "object", "required": ["subscription_id"],
                       "properties": {"subscription_id": {"type": "string"}}}),
 ]
@@ -312,11 +517,27 @@ _ALL_TOOLS: list[Tool] = [
 # ------------------------------------------------------------------ #
 
 async def _main() -> None:
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
     db_path = os.environ.get("OCP_DB_PATH", "ocp.db")
+    watch = os.environ.get("OCP_WATCH", "1") != "0"
+
     app, store, embedder, tokenizer = build_server(db_path)
     await store.setup()
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+
+    # Start background tasks
+    ttl_task = asyncio.create_task(_ttl_cleanup_loop(store))
+    watch_task = asyncio.create_task(_file_watch_loop(store, embedder)) if watch else None
+
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await app.run(read_stream, write_stream, app.create_initialization_options())
+    finally:
+        ttl_task.cancel()
+        if watch_task:
+            watch_task.cancel()
+        await asyncio.gather(ttl_task, watch_task or asyncio.sleep(0),
+                             return_exceptions=True)
 
 
 def main() -> None:

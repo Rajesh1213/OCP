@@ -433,6 +433,97 @@ class SQLiteStore(BaseStore):
                 rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
+    # ------------------------------------------------------------------ #
+    # Workspace helpers                                                    #
+    # ------------------------------------------------------------------ #
+
+    async def get_workspace_root(self, workspace_id: str) -> str | None:
+        db = await self._conn()
+        async with db.execute(
+            "SELECT root_uri FROM workspaces WHERE workspace_id=?", (workspace_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return row["root_uri"] if row else None
+
+    async def list_all_workspaces(self) -> list[dict]:
+        db = await self._conn()
+        async with db.execute("SELECT * FROM workspaces") as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------ #
+    # TTL / maintenance                                                    #
+    # ------------------------------------------------------------------ #
+
+    async def purge_expired_state(self) -> int:
+        """Delete state entries whose ttl_seconds has elapsed since updated_at."""
+        db = await self._conn()
+        async with db.execute(
+            """DELETE FROM state
+               WHERE ttl_seconds IS NOT NULL
+                 AND (
+                   (julianday('now') - julianday(updated_at)) * 86400
+                 ) > ttl_seconds
+               RETURNING 1"""
+        ) as cur:
+            rows = await cur.fetchall()
+        # Also close sessions whose TTL has elapsed
+        async with db.execute(
+            """UPDATE sessions SET closed=1
+               WHERE ttl_seconds IS NOT NULL
+                 AND closed=0
+                 AND (
+                   (julianday('now') - julianday(created_at)) * 86400
+                 ) > ttl_seconds
+               RETURNING session_id"""
+        ) as cur:
+            expired_sessions = [r[0] for r in await cur.fetchall()]
+        await db.commit()
+        return len(rows) + len(expired_sessions)
+
+    # ------------------------------------------------------------------ #
+    # Checkpoint / restore                                                 #
+    # ------------------------------------------------------------------ #
+
+    async def get_checkpoint(self, checkpoint_id: str) -> dict | None:
+        """Return the checkpoint metadata stored as a state entry."""
+        db = await self._conn()
+        async with db.execute(
+            "SELECT value, session_id FROM state WHERE key=?",
+            (f"_checkpoint.{checkpoint_id}",),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        return {"checkpoint_id": checkpoint_id, **json.loads(row["value"]),
+                "session_id": row["session_id"]}
+
+    async def copy_session_state(self, src_session_id: str, dst_session_id: str) -> int:
+        """Copy all session-scoped state from src to dst session."""
+        db = await self._conn()
+        async with db.execute(
+            "SELECT * FROM state WHERE scope='session' AND session_id=?",
+            (src_session_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        count = 0
+        now = _now()
+        for row in rows:
+            if row["key"].startswith("_checkpoint."):
+                continue  # don't copy internal checkpoint markers
+            await db.execute(
+                """INSERT INTO state(key,value,scope,workspace_id,session_id,agent_id,
+                                    ttl_seconds,updated_at,version)
+                   VALUES(?,?,?,?,?,?,?,?,1)
+                   ON CONFLICT(key,scope,workspace_id,session_id,agent_id) DO UPDATE SET
+                     value=excluded.value, updated_at=excluded.updated_at, version=version+1""",
+                (row["key"], row["value"], "session", row["workspace_id"],
+                 dst_session_id, row["agent_id"], row["ttl_seconds"], now),
+            )
+            count += 1
+        await db.commit()
+        return count
+
 
 # ------------------------------------------------------------------ #
 # Helpers                                                              #

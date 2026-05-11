@@ -2,25 +2,42 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-import pytest
 import pytest_asyncio
 
 from ocp_client import OCPClient
 
 
-@pytest_asyncio.fixture(scope="session")
+def _server_cmd() -> str:
+    """Resolve the ocp-server binary.
+
+    Priority:
+    1. OCP_SERVER_CMD env var (explicit override)
+    2. ocp-server in the same venv as the running Python (auto-detect)
+    3. 'ocp-server' on PATH (fallback)
+    """
+    if cmd := os.environ.get("OCP_SERVER_CMD"):
+        return cmd
+    candidate = Path(sys.executable).parent / "ocp-server"
+    if candidate.exists():
+        return str(candidate)
+    return "ocp-server"
+
+
+# Function-scoped: each test gets its own server process.
+# This avoids anyio cancel-scope teardown issues that arise when a session-scoped
+# async fixture is finalized in a different asyncio task than it was entered in.
+@pytest_asyncio.fixture
 async def ocp_client():
     """Start a fresh ocp-server process and yield a connected client."""
-    server_cmd = os.environ.get("OCP_SERVER_CMD", "ocp-server")
+    cmd = _server_cmd()
     with tempfile.TemporaryDirectory() as tmpdir:
         db = os.path.join(tmpdir, "test.db")
         env = {**os.environ, "OCP_DB_PATH": db}
-        async with OCPClient.stdio([server_cmd], env=env) as client:
+        async with OCPClient.stdio([cmd], env=env) as client:
             yield client
 
 

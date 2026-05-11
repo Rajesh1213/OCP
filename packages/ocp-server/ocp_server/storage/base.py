@@ -19,6 +19,12 @@ class BaseStore(ABC):
     @abstractmethod
     async def create_workspace(self, workspace_id: str, root_uri: str, name: str | None, metadata: dict) -> None: ...
 
+    @abstractmethod
+    async def get_workspace_root(self, workspace_id: str) -> str | None: ...
+
+    @abstractmethod
+    async def list_all_workspaces(self) -> list[dict]: ...
+
     # --- chunks ---
     @abstractmethod
     async def upsert_chunk(self, chunk: Chunk, embedding: list[float]) -> None: ...
@@ -80,3 +86,14 @@ class BaseStore(ABC):
 
     @abstractmethod
     async def get_subscriptions_for_workspace(self, workspace_id: str) -> list[dict]: ...
+
+    # --- TTL / maintenance ---
+    @abstractmethod
+    async def purge_expired_state(self) -> int: ...
+
+    # --- checkpoint restore ---
+    @abstractmethod
+    async def copy_session_state(self, src_session_id: str, dst_session_id: str) -> int: ...
+
+    @abstractmethod
+    async def get_checkpoint(self, checkpoint_id: str) -> dict | None: ...
