@@ -38,17 +38,11 @@ def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Any, Tok
     embedder = make_embedder()
     tokenizer = Tokenizer()
 
-    app = Server("ocp-server")
-
-    # MCP server descriptor
-    @app.get_server_info()  # type: ignore[attr-defined]
-    async def server_info() -> dict:
-        return {
-            "name": "ocp-server",
-            "version": "0.1.0",
-            "profiles": ["ocp/0.1"],
-            "conformance": "full",
-        }
+    app = Server(
+        name="ocp-server",
+        version="0.1.0",
+        instructions="OCP/0.1 reference server — profiles: ocp/0.1 — conformance: full",
+    )
 
     @app.list_tools()
     async def list_tools() -> list[Tool]:
