@@ -13,7 +13,6 @@ async def workspace_register(store: BaseStore, root_uri: str, name: str | None, 
     return {"workspace_id": workspace_id, "created": not exists}
 
 
-
 async def workspace_list_chunks(
     store: BaseStore, workspace_id: str, filters: dict | None, cursor: str | None
 ) -> dict:

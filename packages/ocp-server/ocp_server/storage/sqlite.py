@@ -14,6 +14,7 @@ import asyncio
 import datetime
 import json
 import math
+import time
 import uuid
 from typing import Any
 
@@ -232,12 +233,20 @@ class SQLiteStore(BaseStore):
     async def invalidate_chunks_by_path(
         self, workspace_id: str, paths: list[str]
     ) -> list[str]:
-        # B4: return chunk IDs via RETURNING clause instead of a count
+        # B4: return chunk IDs via RETURNING clause instead of a count.
+        # R1: resolve symlinks so that /var/… and /private/var/… both match
+        #     the absolute URI stored by the indexer (which uses Path.resolve()).
+        from pathlib import Path as _Path
         async with self._write_lock:
             db = await self._conn()
             chunk_ids: list[str] = []
             for path in paths:
-                pattern = path if path.startswith("file://") else f"file://{path}"
+                raw = path.removeprefix("file://") if path.startswith("file://") else path
+                try:
+                    resolved = str(_Path(raw).resolve())
+                except Exception:
+                    resolved = raw
+                pattern = f"file://{resolved}"
                 async with db.execute(
                     """UPDATE chunks SET stale=1
                        WHERE workspace_id=? AND source_uri LIKE ? AND stale=0
@@ -523,7 +532,9 @@ class SQLiteStore(BaseStore):
     ) -> str:
         async with self._write_lock:
             db = await self._conn()
-            event_id = f"evt_{uuid.uuid4().hex[:12]}"
+            # R2: monotonic_ns prefix guarantees lexicographic = chronological order,
+            # making event_id > ? comparisons and since= replay correct (§7.1).
+            event_id = f"evt_{time.monotonic_ns():020d}_{uuid.uuid4().hex[:6]}"
             await db.execute(
                 """INSERT INTO events
                    (event_id,subscription_id,workspace_id,type,payload,timestamp)

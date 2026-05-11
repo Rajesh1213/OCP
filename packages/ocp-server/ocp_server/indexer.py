@@ -69,11 +69,10 @@ async def index_workspace(
 
 
 def _chunk_file(workspace_id: str, file_path: Path, root: Path, text: str) -> list[Chunk]:
-    try:
-        rel = file_path.relative_to(root)
-    except ValueError:
-        rel = file_path
-    uri = f"file://{rel}"
+    # R1: store absolute URIs so that invalidation LIKE-patterns can match.
+    # Relative URIs ("file://hello.py") never matched absolute paths passed to
+    # workspace.invalidate or the file watcher, silently returning 0 invalidations.
+    uri = f"file://{file_path.resolve()}"
 
     lines = text.splitlines(keepends=True)
     chunks: list[Chunk] = []
