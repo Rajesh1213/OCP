@@ -78,7 +78,12 @@ def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Any, Tok
     app = Server(
         name="ocp-server",
         version="0.1.0",
-        instructions="OCP/0.1 reference server — profiles: ocp/0.1 — conformance: full",
+        # B9: document k cap as required by §4.2
+        instructions=(
+            "OCP/0.1 reference server — profiles: ocp/0.1 — conformance: full. "
+            "context.search: k is capped at 20. "
+            "Embedding backend: OCP_EMBEDDER=hash|fastembed|openai (default: hash)."
+        ),
     )
 
     # Convenience: emit an OCP event to all subscribers and optionally notify.
@@ -161,11 +166,15 @@ async def _dispatch(
         case "workspace.invalidate":
             ws_id = args["workspace_id"]
             paths = args["paths"]
-            result = await workspace.workspace_invalidate(store, ws_id, paths)
-            # §6.2 — emit chunk.invalidated
-            await emit(ws_id, "chunk.invalidated",
-                       {"chunk_ids": [], "reason": "explicit", "paths": paths})
-            return result
+            # B4: invalidate_chunks_by_path now returns IDs (not a count)
+            if not await store.workspace_exists(ws_id):
+                return _ocp_error("WORKSPACE_NOT_FOUND", f"Workspace not found: {ws_id}")
+            chunk_ids = await store.invalidate_chunks_by_path(ws_id, paths)
+            await emit(ws_id, "chunk.invalidated", {
+                "chunk_ids": chunk_ids,
+                "reason": "explicit",
+            })
+            return {"invalidated": len(chunk_ids)}
 
         case "workspace.list_chunks":
             return await workspace.workspace_list_chunks(
@@ -350,35 +359,58 @@ async def _ttl_cleanup_loop(store: SQLiteStore) -> None:
             log.warning("TTL cleanup error: %s", exc)
 
 
-async def _file_watch_loop(store: SQLiteStore, embedder: Any) -> None:
-    """§6.1 — Watch all registered workspace roots for file changes."""
+async def _file_watch_loop(store: SQLiteStore, embedder: Any, emit: Any) -> None:
+    """§6.1 — Watch all registered workspace roots for file changes.
+
+    B3: emits chunk.invalidated (with actual chunk IDs) on every file change.
+    B8: re-queries workspace list every 60 s to pick up newly registered roots.
+    """
     try:
-        from watchfiles import awatch
+        from watchfiles import awatch, Change
     except ImportError:
         log.warning("watchfiles not available — file watching disabled")
         return
 
-    workspaces = await store.list_all_workspaces()
-    if not workspaces:
-        return
+    while True:
+        workspaces = await store.list_all_workspaces()
+        if not workspaces:
+            await asyncio.sleep(30)
+            continue
 
-    roots = [ws["root_uri"].removeprefix("file://") for ws in workspaces]
-    ws_by_root = {ws["root_uri"].removeprefix("file://"): ws["workspace_id"]
-                  for ws in workspaces}
+        roots = [ws["root_uri"].removeprefix("file://") for ws in workspaces]
+        ws_by_root = {ws["root_uri"].removeprefix("file://"): ws["workspace_id"]
+                      for ws in workspaces}
 
-    log.info("File watcher started for: %s", roots)
-    try:
-        async for changes in awatch(*roots):
-            for _change_type, path in changes:
-                for root, ws_id in ws_by_root.items():
-                    if path.startswith(root):
-                        rel = path[len(root):].lstrip("/")
-                        count = await store.invalidate_chunks_by_path(ws_id, [path])
-                        if count:
-                            log.info("Auto-invalidated %d chunks for %s", count, path)
-                        break
-    except Exception as exc:
-        log.warning("File watcher stopped: %s", exc)
+        log.info("File watcher (re)started for %d workspace(s): %s", len(roots), roots)
+        stop = asyncio.Event()
+
+        # Re-arm every 60 s so newly registered workspaces get picked up (B8)
+        async def _rearm():
+            await asyncio.sleep(60)
+            stop.set()
+
+        rearm_task = asyncio.create_task(_rearm())
+        try:
+            async for changes in awatch(*roots, stop_event=stop):
+                for change_type, path in changes:
+                    for root, ws_id in ws_by_root.items():
+                        if path.startswith(root):
+                            # B3 + B4: get real chunk IDs and emit event
+                            chunk_ids = await store.invalidate_chunks_by_path(ws_id, [path])
+                            if chunk_ids:
+                                log.info(
+                                    "Auto-invalidated %d chunk(s) for %s", len(chunk_ids), path
+                                )
+                                await emit(ws_id, "chunk.invalidated", {
+                                    "chunk_ids": chunk_ids,
+                                    "reason": "file_changed",
+                                })
+                            break
+        except Exception as exc:
+            log.warning("File watcher error: %s — restarting", exc)
+        finally:
+            rearm_task.cancel()
+            await asyncio.gather(rearm_task, return_exceptions=True)
 
 
 # ------------------------------------------------------------------ #
@@ -527,7 +559,7 @@ async def _main() -> None:
 
     # Start background tasks
     ttl_task = asyncio.create_task(_ttl_cleanup_loop(store))
-    watch_task = asyncio.create_task(_file_watch_loop(store, embedder)) if watch else None
+    watch_task = asyncio.create_task(_file_watch_loop(store, embedder, _emit)) if watch else None
 
     try:
         async with stdio_server() as (read_stream, write_stream):

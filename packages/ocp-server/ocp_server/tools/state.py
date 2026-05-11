@@ -1,4 +1,9 @@
-"""§4.3 — State tools."""
+"""§4.3 — State tools.
+
+Fixes:
+  B2  — if_version passed explicitly to store.state_set (not encoded in version field)
+  S1  — state_delete raises CONFLICT on if_version mismatch
+"""
 from __future__ import annotations
 
 from ocp_server.models import Scope, StateEntry
@@ -26,10 +31,10 @@ async def state_set(
         session_id=session_id,
         agent_id=agent_id,
         ttl_seconds=ttl_seconds,
-        version=(if_version + 1) if if_version is not None else 1,
     )
     try:
-        version = await store.state_set(entry)
+        # B2: pass if_version separately — not encoded in entry.version
+        version = await store.state_set(entry, if_version=if_version)
     except ConflictError as exc:
         raise StateConflictError(str(exc)) from exc
     return {"version": version}
@@ -66,7 +71,9 @@ async def state_list(
     cursor: str | None,
 ) -> dict:
     scope_enum = Scope(scope) if scope else None
-    entries, next_cursor = await store.state_list(prefix, scope_enum, workspace_id, session_id, agent_id, cursor)
+    entries, next_cursor = await store.state_list(
+        prefix, scope_enum, workspace_id, session_id, agent_id, cursor
+    )
     return {"entries": [e.model_dump() for e in entries], "next_cursor": next_cursor}
 
 
@@ -80,11 +87,22 @@ async def state_delete(
     if_version: int | None,
 ) -> dict:
     scope_enum = _parse_scope(scope, workspace_id, session_id, agent_id)
-    deleted = await store.state_delete(key, scope_enum, workspace_id, session_id, agent_id, if_version)
+    try:
+        # S1: ConflictError is now raised by the store on if_version mismatch
+        deleted = await store.state_delete(
+            key, scope_enum, workspace_id, session_id, agent_id, if_version
+        )
+    except ConflictError as exc:
+        raise StateConflictError(str(exc)) from exc
     return {"deleted": deleted}
 
 
-def _parse_scope(scope: str, workspace_id: str | None, session_id: str | None, agent_id: str | None) -> Scope:
+def _parse_scope(
+    scope: str,
+    workspace_id: str | None,
+    session_id: str | None,
+    agent_id: str | None,
+) -> Scope:
     try:
         s = Scope(scope)
     except ValueError:

@@ -106,3 +106,45 @@ async def test_scope_invalid_agent_without_id(workspace):
     with pytest.raises(OCPError) as exc_info:
         await client.state_set("x", 1, scope="agent")
     assert exc_info.value.code == "SCOPE_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_state_delete_if_version_conflict(workspace):
+    """state.delete with wrong if_version MUST return CONFLICT. §S1"""
+    ws, client, _ = workspace
+    r = await client.state_set("del_oc", "v1", scope="global", workspace_id=ws.workspace_id)
+    with pytest.raises(OCPError) as exc_info:
+        await client.state_delete("del_oc", scope="global",
+                                  workspace_id=ws.workspace_id, if_version=999)
+    assert exc_info.value.code == "CONFLICT"
+    # Entry must still exist
+    entry = await client.state_get("del_oc", scope="global", workspace_id=ws.workspace_id)
+    assert entry is not None
+
+
+@pytest.mark.asyncio
+async def test_state_set_if_version_zero_means_create_only(workspace):
+    """state.set with if_version=0 MUST succeed only when key is absent. §B2"""
+    ws, client, _ = workspace
+    # First write with if_version=0 should succeed (key absent → version 0)
+    r = await client.state_set("create_only", "first", scope="global",
+                               workspace_id=ws.workspace_id, if_version=0)
+    assert r.version == 1
+
+    # Second write with if_version=0 should CONFLICT (key now exists)
+    with pytest.raises(OCPError) as exc_info:
+        await client.state_set("create_only", "second", scope="global",
+                               workspace_id=ws.workspace_id, if_version=0)
+    assert exc_info.value.code == "CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_invalidate_idempotent_at_error_level(workspace):
+    """workspace.invalidate called twice MUST NOT error on either call. §4.1"""
+    ws, client, tmp_path = workspace
+    await client.workspace_index(ws.workspace_id)
+    # Both calls must succeed without raising
+    r1 = await client.workspace_invalidate(ws.workspace_id, [str(tmp_path)])
+    r2 = await client.workspace_invalidate(ws.workspace_id, [str(tmp_path)])
+    # Second call returns 0 — already stale
+    assert r2.invalidated == 0

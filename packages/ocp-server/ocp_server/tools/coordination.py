@@ -1,8 +1,14 @@
-"""§4.4 — Coordination tools."""
+"""§4.4 — Coordination tools.
+
+Fixes:
+  B1  — session_checkpoint gets workspace_id from store; no longer crashes
+  B5  — session_restore validates source session and propagates workspace_id properly
+"""
 from __future__ import annotations
 
 import uuid
 
+from ocp_server.models import Scope, StateEntry
 from ocp_server.storage.base import BaseStore
 
 
@@ -35,18 +41,16 @@ async def session_handoff(
 
     handoff_id = f"ho_{uuid.uuid4().hex[:12]}"
 
-    # Deliver via _inbox state key for to_agent
-    from ocp_server.models import Scope, StateEntry
+    # S2: _inbox is agent-scoped; workspace_id is intentionally None for agent scope.
+    # session_id is stored for informational purposes only — not required by the model.
     entry = StateEntry(
         key="_inbox",
         value={"from_agent": from_agent, "handoff_id": handoff_id, "message": message},
         scope=Scope.agent,
-        workspace_id=None,
-        session_id=session_id,
         agent_id=to_agent,
+        # workspace_id and session_id deliberately omitted: agent scope doesn't require them.
     )
     await store.state_set(entry)
-
     return {"delivered": True, "handoff_id": handoff_id}
 
 
@@ -58,39 +62,46 @@ async def session_checkpoint(
 ) -> dict:
     if not await store.session_exists(session_id):
         raise SessionNotFoundError(session_id)
+
+    # B1: look up the real workspace_id rather than hardcoding None
+    workspace_id = await store.get_session_workspace(session_id)
+    if workspace_id is None:
+        raise SessionNotFoundError(session_id)
+
     checkpoint_id = f"ckpt_{uuid.uuid4().hex[:16]}"
-    # Persist checkpoint label as session-scoped state
-    from ocp_server.models import Scope, StateEntry
+
     entry = StateEntry(
         key=f"_checkpoint.{checkpoint_id}",
         value={"label": label, "session_id": session_id},
         scope=Scope.session,
         session_id=session_id,
-        workspace_id=None,
+        workspace_id=workspace_id,   # ← B1 fix: validator satisfied
     )
-    # workspace_id may be None here — coordination tools tolerate that
     await store.state_set(entry)
     return {"checkpoint_id": checkpoint_id}
 
 
 async def session_restore(store: BaseStore, checkpoint_id: str) -> dict:
-    """Restore a session from a checkpoint — §4.4."""
+    # B5: validate source session; propagate workspace_id cleanly
     ckpt = await store.get_checkpoint(checkpoint_id)
     if ckpt is None:
         raise SessionNotFoundError(f"checkpoint:{checkpoint_id}")
 
     src_session_id = ckpt["session_id"]
+
+    # Get workspace from the sessions table (survives session.close)
+    workspace_id = await store.get_session_workspace(src_session_id)
+    if workspace_id is None:
+        # Fall back to workspace embedded in checkpoint value
+        workspace_id = ckpt.get("workspace_id", "")
+    if not workspace_id:
+        raise SessionNotFoundError(
+            f"Cannot determine workspace for checkpoint {checkpoint_id}"
+        )
+
     new_session_id = str(uuid.uuid4())
-
-    # Materialise the new session in the same workspace
-    src_row = await store.session_exists(src_session_id)
-    # Best-effort: get workspace_id from source state entries
-    entries, _ = await store.state_list(None, None, None, src_session_id, None, None)
-    workspace_id = entries[0].workspace_id if entries else None
-
-    await store.session_open(workspace_id or "", new_session_id, None, {})
+    await store.session_open(workspace_id, new_session_id, None, {})
     await store.copy_session_state(src_session_id, new_session_id)
-
     return {"session_id": new_session_id}
 
 

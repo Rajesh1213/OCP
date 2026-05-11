@@ -78,3 +78,61 @@ async def test_session_checkpoint_restore(workspace):
 
     restored = await client.session_restore(ckpt.checkpoint_id)
     assert restored.session_id
+
+
+@pytest.mark.asyncio
+async def test_session_restore_copies_state(workspace):
+    """session.restore MUST copy session-scoped state into the new session. §4.4 §B5"""
+    ws, client, _ = workspace
+    sess = await client.session_open(ws.workspace_id)
+
+    await client.state_set("plan.step", 42, scope="session",
+                           workspace_id=ws.workspace_id, session_id=sess.session_id)
+
+    ckpt = await client.session_checkpoint(sess.session_id, label="with-state")
+    restored = await client.session_restore(ckpt.checkpoint_id)
+
+    entry = await client.state_get("plan.step", scope="session",
+                                   workspace_id=ws.workspace_id,
+                                   session_id=restored.session_id)
+    assert entry is not None
+    assert entry.value == 42
+
+
+@pytest.mark.asyncio
+async def test_handoff_delivers_to_agent_inbox(workspace):
+    """session.handoff MUST deliver message readable via state.get(_inbox). §4.4"""
+    ws, client, _ = workspace
+    sess = await client.session_open(ws.workspace_id)
+
+    ho = await client.session_handoff(
+        sess.session_id, from_agent="planner", to_agent="exec-007",
+        message={"task": "summarise"},
+    )
+    assert ho.delivered
+    assert ho.handoff_id
+
+    inbox = await client.state_get("_inbox", scope="agent", agent_id="exec-007")
+    assert inbox is not None
+    assert inbox.value["from_agent"] == "planner"
+    assert inbox.value["message"]["task"] == "summarise"
+
+
+@pytest.mark.asyncio
+async def test_lazy_session_materialisation(workspace):
+    """state.set with unknown session_id MUST auto-create the session. §S3"""
+    ws, client, _ = workspace
+    novel_sid = "novel-session-abc123"
+
+    # This must NOT raise SESSION_NOT_FOUND
+    r = await client.state_set("lazy.key", "val", scope="session",
+                               workspace_id=ws.workspace_id,
+                               session_id=novel_sid)
+    assert r.version >= 1
+
+    # Verify the value is readable
+    entry = await client.state_get("lazy.key", scope="session",
+                                   workspace_id=ws.workspace_id,
+                                   session_id=novel_sid)
+    assert entry is not None
+    assert entry.value == "val"

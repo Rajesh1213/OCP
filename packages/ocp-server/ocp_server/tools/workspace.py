@@ -13,12 +13,6 @@ async def workspace_register(store: BaseStore, root_uri: str, name: str | None, 
     return {"workspace_id": workspace_id, "created": not exists}
 
 
-async def workspace_invalidate(store: BaseStore, workspace_id: str, paths: list[str]) -> dict:
-    if not await store.workspace_exists(workspace_id):
-        raise WorkspaceNotFoundError(workspace_id)
-    count = await store.invalidate_chunks_by_path(workspace_id, paths)
-    return {"invalidated": count}
-
 
 async def workspace_list_chunks(
     store: BaseStore, workspace_id: str, filters: dict | None, cursor: str | None
