@@ -27,9 +27,13 @@ services:
       OCP_DATABASE_URL: postgresql://ocp:ocp_dev_password@postgres:5432/ocp
       OCP_PORT: 8080
       OCP_HOST: 0.0.0.0
-      # Set your API keys here or via .env file
-      # OCP_API_KEYS: key-prod-changeme
-      # OCP_API_KEY_WORKSPACES: key-prod-changeme:ws_abc,ws_def
+      # API keys — override via .env file or environment in production.
+      # Format:  OCP_API_KEYS=key1,key2
+      # Per-key workspace scoping (optional):
+      #   OCP_API_KEY_WORKSPACES=key1:ws_id1,ws_id2;key2:ws_id3
+      # Leave OCP_API_KEYS unset only for local development (open mode).
+      OCP_API_KEYS: ${OCP_API_KEYS:-}
+      OCP_API_KEY_WORKSPACES: ${OCP_API_KEY_WORKSPACES:-}
     ports:
       - "8080:8080"
     depends_on:
@@ -39,6 +43,7 @@ services:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
       interval: 10s
       timeout: 5s
+      start_period: 15s
       retries: 5
 
 volumes:

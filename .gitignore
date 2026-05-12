@@ -16,3 +16,4 @@ build/
 *.vec
 .env
 .env.local
+.env.*.local
