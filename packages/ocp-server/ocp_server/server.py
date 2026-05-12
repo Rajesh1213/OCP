@@ -15,6 +15,14 @@ from mcp.types import (
     Tool,
 )
 
+from ocp_server.auth import (
+    AuthConfig,
+    PermissionDeniedError,
+    get_auth_context,
+    load_auth_config,
+    set_auth_context,
+    reset_auth_context,
+)
 from ocp_server.embedder import make_embedder, Tokenizer
 from ocp_server.indexer import index_workspace
 from ocp_server.storage.sqlite import SQLiteStore
@@ -36,6 +44,11 @@ def _handle_known(exc: Exception) -> dict | None:
     if code:
         return _ocp_error(code, str(exc))
     return None
+
+
+def _check_ws(workspace_id: str) -> None:
+    """Raise PermissionDeniedError if current auth context cannot access workspace."""
+    get_auth_context().assert_workspace(workspace_id)
 
 
 # ------------------------------------------------------------------ #
@@ -102,6 +115,8 @@ def build_server(db_path: str = "ocp.db") -> tuple[Server, SQLiteStore, Any, Tok
         import json
         try:
             result = await _dispatch(name, arguments, store, embedder, tokenizer, _emit)
+        except PermissionDeniedError as exc:
+            result = _ocp_error("PERMISSION_DENIED", str(exc))
         except Exception as exc:
             err = _handle_known(exc)
             if err:
@@ -129,15 +144,20 @@ async def _dispatch(
 
         # ── workspace ──────────────────────────────────────────────
         case "workspace.register":
-            return await workspace.workspace_register(
+            result = await workspace.workspace_register(
                 store,
                 root_uri=args["root_uri"],
                 name=args.get("name"),
                 metadata=args.get("metadata", {}),
             )
+            # Grant access check AFTER registration so the key can bootstrap
+            # its first workspace. On subsequent calls the workspace already exists.
+            _check_ws(result["workspace_id"])
+            return result
 
         case "workspace.index":
             ws_id = args["workspace_id"]
+            _check_ws(ws_id)
             root_uri = await store.get_workspace_root(ws_id)
             if root_uri is None:
                 return _ocp_error("WORKSPACE_NOT_FOUND", f"Workspace not found: {ws_id}")
@@ -182,6 +202,7 @@ async def _dispatch(
 
         case "workspace.invalidate":
             ws_id = args["workspace_id"]
+            _check_ws(ws_id)
             paths = args["paths"]
             # B4: invalidate_chunks_by_path now returns IDs (not a count)
             if not await store.workspace_exists(ws_id):
@@ -194,12 +215,14 @@ async def _dispatch(
             return {"invalidated": len(chunk_ids)}
 
         case "workspace.list_chunks":
+            _check_ws(args["workspace_id"])
             return await workspace.workspace_list_chunks(
                 store, args["workspace_id"], args.get("filters"), args.get("cursor")
             )
 
         # ── retrieval ──────────────────────────────────────────────
         case "context.search":
+            _check_ws(args["workspace_id"])
             return await retrieval.context_search(
                 store, embedder,
                 workspace_id=args["workspace_id"],
@@ -212,6 +235,7 @@ async def _dispatch(
             return await retrieval.context_get_chunk(store, args["chunk_id"])
 
         case "context.pack":
+            _check_ws(args["workspace_id"])
             return await retrieval.context_pack(
                 store, embedder, tokenizer,
                 workspace_id=args["workspace_id"],
@@ -223,6 +247,8 @@ async def _dispatch(
         # ── state ──────────────────────────────────────────────────
         case "state.set":
             ws_id = args.get("workspace_id")
+            if ws_id:
+                _check_ws(ws_id)
             sess_id = args.get("session_id")
             agent_id = args.get("agent_id")
             scope = args["scope"]
@@ -269,6 +295,8 @@ async def _dispatch(
 
         case "state.delete":
             ws_id = args.get("workspace_id")
+            if ws_id:
+                _check_ws(ws_id)
             scope = args["scope"]
             sess_id = args.get("session_id")
             agent_id = args.get("agent_id")
@@ -291,6 +319,7 @@ async def _dispatch(
 
         # ── coordination ───────────────────────────────────────────
         case "session.open":
+            _check_ws(args["workspace_id"])
             return await coordination.session_open(
                 store,
                 workspace_id=args["workspace_id"],
@@ -345,6 +374,7 @@ async def _dispatch(
 
         # ── events ─────────────────────────────────────────────────
         case "events.subscribe":
+            _check_ws(args["workspace_id"])
             return await events.events_subscribe(
                 store,
                 workspace_id=args["workspace_id"],
@@ -580,6 +610,26 @@ async def _main() -> None:
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     db_path = os.environ.get("OCP_DB_PATH", "ocp.db")
     watch = os.environ.get("OCP_WATCH", "1") != "0"
+
+    # Auth: in stdio mode the spawning process sets OCP_API_KEY.
+    # If unset the server runs in open/dev mode.
+    auth_cfg = load_auth_config()
+    api_key = os.environ.get("OCP_API_KEY", "").strip()
+    if auth_cfg.enabled:
+        ctx = auth_cfg.validate_key(api_key)
+        if ctx is None:
+            raise SystemExit(
+                f"OCP_API_KEY='{api_key}' is not in OCP_API_KEYS. Refusing to start."
+            )
+        set_auth_context(ctx)
+        log.info("Auth enabled — key grants access to %s",
+                 "all workspaces" if ctx.allowed_workspaces is None
+                 else str(ctx.allowed_workspaces))
+    else:
+        log.warning(
+            "OCP_API_KEYS not set — running in open/dev mode. "
+            "Do not expose to untrusted clients."
+        )
 
     app, store, embedder, tokenizer, emit_fn = build_server(db_path)
     await store.setup()

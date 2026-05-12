@@ -12,10 +12,17 @@ dependencies = [
     "aiofiles>=23.2",
     "watchfiles>=0.22",
     "uvicorn[standard]>=0.29",
+    "starlette>=0.37",
+    # Postgres backend (optional — only needed when OCP_DATABASE_URL is set)
+    "asyncpg>=0.29; extra == 'postgres'",
 ]
 
+[project.optional-dependencies]
+postgres = ["asyncpg>=0.29"]
+
 [project.scripts]
-ocp-server = "ocp_server.server:main"
+ocp-server      = "ocp_server.server:main"
+ocp-server-http = "ocp_server.server_http:main"
 
 [build-system]
 requires = ["hatchling"]
