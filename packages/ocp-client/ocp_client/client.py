@@ -7,6 +7,7 @@ from typing import Any, AsyncIterator
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.types import TextContent
 
 from ocp_client.types import (
     Chunk,
@@ -61,7 +62,10 @@ class OCPClient:
         result = await self._session.call_tool(tool, args)
         if not result.content:
             return {}
-        raw = result.content[0].text
+        item = result.content[0]
+        if not isinstance(item, TextContent):
+            return {}
+        raw = item.text
         data = json.loads(raw)
         if "error" in data:
             raise OCPError(data["error"]["code"], data["error"]["message"])

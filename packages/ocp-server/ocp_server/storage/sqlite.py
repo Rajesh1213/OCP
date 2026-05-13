@@ -296,7 +296,7 @@ class SQLiteStore(BaseStore):
             "SELECT * FROM chunks WHERE workspace_id=? LIMIT ? OFFSET ?",
             (workspace_id, page + 1, offset),
         ) as cur:
-            rows = await cur.fetchall()
+            rows = list(await cur.fetchall())
         next_cursor = str(offset + page) if len(rows) > page else None
         return [_row_to_chunk(r) for r in rows[:page]], next_cursor
 
@@ -406,7 +406,7 @@ class SQLiteStore(BaseStore):
         async with db.execute(
             f"SELECT * FROM state WHERE {where} LIMIT ? OFFSET ?", params
         ) as cur:
-            rows = await cur.fetchall()
+            rows = list(await cur.fetchall())
         next_cursor = str(offset + page) if len(rows) > page else None
         return [_row_to_state(r) for r in rows[:page]], next_cursor
 
@@ -605,7 +605,7 @@ class SQLiteStore(BaseStore):
                      AND ((julianday('now') - julianday(updated_at)) * 86400) > ttl_seconds
                    RETURNING 1"""
             ) as cur:
-                rows = await cur.fetchall()
+                rows = list(await cur.fetchall())
             await db.commit()
         return len(rows)
 
@@ -708,7 +708,7 @@ class SQLiteStore(BaseStore):
             async with db.execute(
                 "DELETE FROM state WHERE session_id=? RETURNING 1", (session_id,)
             ) as cur:
-                rows = await cur.fetchall()
+                rows = list(await cur.fetchall())
             await db.commit()
         return len(rows)
 

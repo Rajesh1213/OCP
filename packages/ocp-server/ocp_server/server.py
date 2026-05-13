@@ -61,16 +61,15 @@ async def _send_ocp_notification(app: Server, envelope: dict) -> None:
     """
     try:
         ctx = app.request_context
-        await ctx.session.send_notification(
-            LoggingMessageNotification(
-                method="notifications/message",
-                params=LoggingMessageNotificationParams(
-                    level="info",
-                    logger="ocp.events",
-                    data=envelope,
-                ),
-            )
+        notification: Any = LoggingMessageNotification(
+            method="notifications/message",
+            params=LoggingMessageNotificationParams(
+                level="info",
+                logger="ocp.events",
+                data=envelope,
+            ),
         )
+        await ctx.session.send_notification(notification)
     except LookupError:
         pass  # not inside a request context
     except Exception as exc:

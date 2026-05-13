@@ -172,14 +172,13 @@ def build_mcp_server(store: Any) -> tuple[Any, Any, Any]:
     async def _send_notification(envelope: dict) -> None:
         try:
             ctx = app.request_context
-            await ctx.session.send_notification(
-                LoggingMessageNotification(
-                    method="notifications/message",
-                    params=LoggingMessageNotificationParams(
-                        level="info", logger="ocp.events", data=envelope,
-                    ),
-                )
+            notification: Any = LoggingMessageNotification(
+                method="notifications/message",
+                params=LoggingMessageNotificationParams(
+                    level="info", logger="ocp.events", data=envelope,
+                ),
             )
+            await ctx.session.send_notification(notification)
         except (LookupError, Exception):
             pass
 

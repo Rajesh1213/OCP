@@ -12,7 +12,7 @@ import asyncio
 import hashlib
 import os
 import re
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -77,7 +77,7 @@ class FastEmbedEmbedder:
 
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
         self._model_name = model_name
-        self._model = None
+        self._model: Any = None
         self._dim_val: int | None = None
 
     @property
@@ -149,7 +149,7 @@ class Tokenizer:
     """Token counter.  Uses tiktoken when available, falls back to word-split."""
 
     def __init__(self) -> None:
-        self._enc = None
+        self._enc: Any = None
         self._use_tiktoken = True
 
     def _load(self) -> None:
