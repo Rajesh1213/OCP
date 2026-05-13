@@ -4,12 +4,6 @@ version = "0.1.0"
 description = "Open Context Protocol — reference server implementation"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
-
-[project.urls]
-Homepage = "https://github.com/Rajesh1213/OCP"
-Repository = "https://github.com/Rajesh1213/OCP"
-Documentation = "https://github.com/Rajesh1213/OCP/blob/main/docs/integrations.md"
-"Bug Tracker" = "https://github.com/Rajesh1213/OCP/issues"
 dependencies = [
     "mcp>=1.0",
     "pydantic>=2.7",
@@ -26,6 +20,12 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["asyncpg>=0.29"]
+
+[project.urls]
+Homepage = "https://github.com/Rajesh1213/OCP"
+Repository = "https://github.com/Rajesh1213/OCP"
+Documentation = "https://github.com/Rajesh1213/OCP/blob/main/docs/integrations.md"
+"Bug Tracker" = "https://github.com/Rajesh1213/OCP/issues"
 
 [project.scripts]
 ocp-server      = "ocp_server.server:main"
