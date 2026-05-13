@@ -2,7 +2,18 @@
 
 This guide walks through every major feature of the Open Context Protocol with runnable Python examples. All examples use the `ocp-client` async SDK and assume the server is running.
 
-**Prerequisites:** completed the [installation steps](../README.md#installation) and have the virtualenv active.
+**Prerequisites:** Python 3.11+. Install the packages from PyPI:
+
+```bash
+pip install ocp-server ocp-client
+```
+
+Alternatively, run the server without a permanent install using `uvx ocp-server` and install only the client:
+
+```bash
+pip install ocp-client   # client SDK only
+uvx ocp-server           # runs the server from PyPI on demand
+```
 
 ---
 
@@ -17,6 +28,7 @@ This guide walks through every major feature of the Open Context Protocol with r
 7. [Authentication](#7-authentication)
 8. [Error handling](#8-error-handling)
 9. [Common patterns](#9-common-patterns)
+10. [Running in Docker](#10-running-in-docker)
 
 ---
 
@@ -90,7 +102,7 @@ Supported file extensions: `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`, `.rs`, `.
 
 ```python
 result = await client.workspace_index(ws.workspace_id)
-print(f"Indexed {result['indexed']} chunks ({result['skipped']} unchanged) in {result['duration_ms']} ms")
+print(f"Indexed {result.indexed} chunks ({result.skipped} unchanged) in {result.duration_ms} ms")
 ```
 
 **Output example:**
@@ -119,7 +131,7 @@ Mark chunks from specific paths as stale when you know files have changed outsid
 
 ```python
 result = await client.workspace_invalidate(ws.workspace_id, paths=["src/auth/jwt.py"])
-print(f"Invalidated {result['invalidated']} chunks")
+print(f"Invalidated {result.invalidated} chunks")
 ```
 
 > **Automatic invalidation:** When `OCP_WATCH=1` (the default), the server monitors registered workspace roots with `watchfiles`. Any file change automatically marks affected chunks stale and emits a `chunk.invalidated` event — no manual call needed.
@@ -243,9 +255,9 @@ pack = await client.context_pack(
     include_state=True,  # also includes global state entries
 )
 
-print(f"Packed {pack.token_count} tokens from {len(pack.chunk_ids)} chunks")
+print(f"Packed {pack.tokens} tokens from {len(pack.chunk_ids)} chunks")
 print()
-print(pack.text)   # ready to inject into a prompt
+print(pack.context)   # ready to inject into a prompt
 ```
 
 **Output example:**
@@ -452,7 +464,7 @@ closed = await client.session_close(sess.session_id)
 print(closed)  # True
 ```
 
-> Sessions are also auto-materialized: the first `state.set` or `session.handoff` that references an unknown `session_id` creates the session implicitly. You only need `session.open` when you want explicit control over TTL or metadata.
+> Sessions are auto-materialised by `state.set` only — `session.handoff` requires the session to already exist. Use `session.open` when you want explicit control over TTL or metadata, or before calling `session.handoff`.
 
 ### Agent handoff
 
@@ -633,8 +645,9 @@ except OCPError as e:
 | `STALE` | Chunk exists but has been invalidated (file changed) |
 | `CONFLICT` | Optimistic lock failure (`if_version` mismatch) |
 | `PERMISSION_DENIED` | API key not allowed to access this workspace |
+| `SESSION_NOT_FOUND` | The `session_id` does not exist |
 | `METHOD_NOT_FOUND` | Unknown tool name |
-| `NOT_FOUND` | Generic not-found (e.g. session, subscription) |
+| `NOT_FOUND` | Generic not-found (e.g. subscription) |
 
 ---
 
@@ -649,14 +662,15 @@ from ocp_client import OCPClient
 async def rag_context(query: str, budget_tokens: int = 4096) -> str:
     async with OCPClient.stdio(["ocp-server"]) as client:
         ws = await client.workspace_register("file:///path/to/repo")
-        await client.workspace_index(ws.workspace_id)
+        result = await client.workspace_index(ws.workspace_id)
+        print(f"Indexed {result.indexed} chunks ({result.skipped} unchanged) in {result.duration_ms} ms")
 
         pack = await client.context_pack(
             ws.workspace_id,
             intent=query,
             budget_tokens=budget_tokens,
         )
-        return pack.text
+        return pack.context
 
 context = asyncio.run(rag_context("how does the auth middleware work?"))
 print(context)
@@ -767,6 +781,68 @@ asyncio.run(watch_workspace())
 
 ---
 
+## 10. Running in Docker
+
+The OCP server is published as a Docker image at `ghcr.io/rajesh1213/ocp:latest`.
+
+### Pull and run the HTTP server
+
+```bash
+docker pull ghcr.io/rajesh1213/ocp:latest
+
+# Start the HTTP/SSE server on port 8080
+docker run --rm -p 8080:8080 \
+  -e OCP_API_KEYS=my-secret-key \
+  ghcr.io/rajesh1213/ocp:latest
+
+# Health check
+curl http://localhost:8080/health
+```
+
+### Mount a local directory as a workspace
+
+To index files from the host, mount the directory into the container:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e OCP_API_KEYS=my-secret-key \
+  -v /path/to/your/repo:/workspace:ro \
+  ghcr.io/rajesh1213/ocp:latest
+```
+
+Then register the workspace using the container-internal path:
+
+```python
+ws = await client.workspace_register("file:///workspace")
+```
+
+### Connect a client to the HTTP server
+
+When the server is running in HTTP mode, use an MCP HTTP/SSE client instead of the stdio client. You can also use the stdio client to spawn a local `ocp-server` that proxies to the HTTP backend, or connect directly using an HTTP-capable MCP client library.
+
+```bash
+# With Docker Compose (PostgreSQL + OCP)
+cp .env.example .env
+# Edit .env: set OCP_API_KEYS and optionally OCP_EMBEDDER=fastembed
+
+docker compose up
+# OCP server:  http://localhost:8080
+# Health:      http://localhost:8080/health
+# PostgreSQL:  localhost:5432
+```
+
+### Environment variables in Docker
+
+All [configuration variables](../README.md#configuration-reference) are passed as `-e` flags or via `--env-file`:
+
+```bash
+docker run --rm -p 8080:8080 \
+  --env-file .env \
+  ghcr.io/rajesh1213/ocp:latest
+```
+
+---
+
 ## Conformance levels
 
 When building your own OCP server, advertise the correct conformance level:
@@ -786,4 +862,4 @@ Run the conformance suite against your implementation:
 OCP_SERVER_CMD=/path/to/your-ocp-server bash scripts/run-conformance.sh
 ```
 
-The suite covers all normative `MUST` and `SHOULD` requirements from [OCP-0001](OCP-0001.md).
+The suite covers all normative `MUST` and `SHOULD` requirements from [OCP-0001](../spec/OCP-0001.md).

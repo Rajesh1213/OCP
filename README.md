@@ -1,6 +1,8 @@
 # Open Context Protocol (OCP)
 
-**Status:** Draft — RFC v0.1 | **License:** Apache-2.0 (code) · CC-BY 4.0 (spec)
+[![PyPI](https://img.shields.io/pypi/v/ocp-server)](https://pypi.org/project/ocp-server/) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
+**Status:** v0.1.0 — RFC draft | [PyPI](https://pypi.org/project/ocp-server/) | Apache-2.0 (code) · CC-BY 4.0 (spec)
 
 OCP is a protocol for sharing retrievable context, persistent state, and invalidation events across AI agents, models, frameworks, and organizations. It is layered on top of the [Model Context Protocol (MCP)](https://modelcontextprotocol.io): every OCP server is an MCP server, every OCP client is an MCP client.
 
@@ -38,16 +40,14 @@ Where MCP provides transport and tool-call mechanics, OCP adds:
 
 ## Quick start
 
+No installation required — `uvx` runs the server directly from PyPI:
+
 ```bash
-# 1. Install
-git clone https://github.com/Rajesh1213/OCP.git && cd OCP
-bash scripts/dev-install.sh
-source .venv/bin/activate
+# 1. Start the server (zero-install, stdio transport, SQLite, no auth)
+uvx ocp-server
 
-# 2. Start the server (stdio transport, SQLite, no auth)
-ocp-server
-
-# 3. In a separate script, connect a client and search
+# 2. In a separate script, connect a client and search
+pip install ocp-client
 python - <<'EOF'
 import asyncio
 from ocp_client import OCPClient
@@ -58,7 +58,8 @@ async def main():
         await client.workspace_index(ws.workspace_id)
         results = await client.context_search(ws.workspace_id, "authentication middleware")
         for chunk, score in zip(results.chunks, results.scores):
-            print(f"[{score:.3f}] {chunk.source.uri}:{chunk.source.range.start_line if chunk.source.range else ''}")
+            loc = f":{chunk.source.range.start_line}" if chunk.source.range else ""
+            print(f"[{score:.3f}] {chunk.source.uri}{loc}")
             print(chunk.content[:200])
             print()
 
@@ -70,7 +71,40 @@ EOF
 
 ## Installation
 
-**Prerequisites:** Python 3.11+, [uv](https://docs.astral.sh/uv/)
+**Prerequisites:** Python 3.11+
+
+### pip (recommended)
+
+```bash
+pip install ocp-server          # server + CLI commands
+pip install ocp-client          # Python async client SDK
+```
+
+### Zero-install via uvx
+
+[uv](https://docs.astral.sh/uv/) can run the server directly from PyPI without a dedicated install step:
+
+```bash
+uvx ocp-server
+uvx ocp-server-http
+```
+
+After `pip install ocp-server`, the following CLI commands are available:
+
+| Command | Description |
+|---|---|
+| `ocp-server` | stdio transport (for agent integrations) |
+| `ocp-server-http` | HTTP/SSE transport (for multi-client scenarios) |
+
+The `ocp-client` package is importable as:
+
+```python
+from ocp_client import OCPClient
+```
+
+### Contributing / development
+
+If you are contributing to OCP itself, clone the repo and use the dev-install script:
 
 ```bash
 git clone https://github.com/Rajesh1213/OCP.git
@@ -152,7 +186,7 @@ print(ws.workspace_id)   # ws_<hex>
 
 # Index all supported files (py, ts, js, go, md, yaml, json, ...)
 result = await client.workspace_index(ws.workspace_id)
-print(f"Indexed {result['indexed']} chunks in {result['duration_ms']} ms")
+print(f"Indexed {result.indexed} chunks in {result.duration_ms} ms")
 
 # Index specific paths only
 await client.workspace_index(ws.workspace_id, paths=["src/auth/"])
@@ -181,8 +215,8 @@ pack = await client.context_pack(
     budget_tokens=4096,
     include_state=True,
 )
-print(pack.text)          # assembled context string
-print(pack.token_count)   # actual token count
+print(pack.context)       # assembled context string
+print(pack.tokens)        # actual token count
 ```
 
 ### State management
@@ -294,6 +328,13 @@ cp .env.example .env
 
 ## Deployment
 
+### Docker
+
+```bash
+docker pull ghcr.io/rajesh1213/ocp:latest
+docker run -p 8080:8080 ghcr.io/rajesh1213/ocp:latest
+```
+
 ### Docker Compose (PostgreSQL + OCP server)
 
 ```bash
@@ -354,7 +395,7 @@ Conformance levels:
 | `core+coordination` | core + session coordination |
 | `full` | core+coordination + events |
 
-The reference server currently advertises **`core+coordination`**.
+The reference server currently advertises **`core+coordination`** (44/44 tests passing).
 
 ---
 
@@ -363,9 +404,10 @@ The reference server currently advertises **`core+coordination`**.
 ```
 ocp/
 ├── docs/
-│   ├── OCP-0001.md          # Protocol specification RFC v0.1
+│   ├── integrations.md      # Claude Code, Claude Desktop, Cursor, HTTP/SSE
 │   └── usage.md             # Detailed usage guide (this file's companion)
 ├── spec/
+│   ├── OCP-0001.md          # Protocol specification RFC v0.1
 │   └── LICENSE.md           # CC-BY 4.0 (specification text)
 ├── packages/
 │   ├── ocp-server/          # Reference server implementation
@@ -385,7 +427,7 @@ ocp/
 │   └── ocp-conformance/     # OCP-0002 conformance test suite
 │       └── ocp_conformance/
 │           ├── runner.py        # CLI entry point
-│           └── suite/           # 43 test functions across 6 files
+│           └── suite/           # 44 test functions across 6 files
 ├── scripts/
 │   ├── dev-install.sh       # One-shot development setup
 │   └── run-conformance.sh   # Conformance runner
@@ -399,7 +441,7 @@ ocp/
 
 ## Specification
 
-The protocol specification lives in [`docs/OCP-0001.md`](docs/OCP-0001.md). Key sections:
+The protocol specification lives in [`spec/OCP-0001.md`](spec/OCP-0001.md). Key sections:
 
 | Section | Topic |
 |---|---|
