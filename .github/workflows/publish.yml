@@ -6,15 +6,15 @@ on:
 
 permissions:
   contents: read
-  id-token: write        # PyPI trusted publishing
-  packages: write        # ghcr.io Docker push
 
 jobs:
-  # ── PyPI ────────────────────────────────────────────────────────────────
-  pypi:
-    name: Publish to PyPI
+  # ── PyPI: ocp-server ────────────────────────────────────────────────────
+  pypi-server:
+    name: Publish ocp-server to PyPI
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      id-token: write        # OIDC token scoped to ocp-server pending publisher
     steps:
       - uses: actions/checkout@v4
 
@@ -25,10 +25,29 @@ jobs:
       - name: Build ocp-server
         run: uv build --package ocp-server --out-dir dist/
 
+      - name: Publish ocp-server
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  # ── PyPI: ocp-client ────────────────────────────────────────────────────
+  pypi-client:
+    name: Publish ocp-client to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # OIDC token scoped to ocp-client pending publisher
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
       - name: Build ocp-client
         run: uv build --package ocp-client --out-dir dist/
 
-      - name: Publish to PyPI
+      - name: Publish ocp-client
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
@@ -37,6 +56,8 @@ jobs:
   docker:
     name: Publish Docker image
     runs-on: ubuntu-latest
+    permissions:
+      packages: write        # ghcr.io push
     steps:
       - uses: actions/checkout@v4
 
