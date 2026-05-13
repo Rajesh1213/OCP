@@ -2,7 +2,6 @@
 name = "ocp-client"
 version = "0.1.0"
 description = "Open Context Protocol — Python client SDK"
-readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 
