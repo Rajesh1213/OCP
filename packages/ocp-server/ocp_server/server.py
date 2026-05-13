@@ -650,7 +650,10 @@ async def _main() -> None:
 
 
 def main() -> None:
-    asyncio.run(_main())
+    try:
+        asyncio.run(_main())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
 
 
 if __name__ == "__main__":

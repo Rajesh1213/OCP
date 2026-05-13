@@ -2,7 +2,15 @@
 name = "ocp-server"
 version = "0.1.0"
 description = "Open Context Protocol — reference server implementation"
+readme = "README.md"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
+
+[project.urls]
+Homepage = "https://github.com/Rajesh1213/OCP"
+Repository = "https://github.com/Rajesh1213/OCP"
+Documentation = "https://github.com/Rajesh1213/OCP/blob/main/docs/integrations.md"
+"Bug Tracker" = "https://github.com/Rajesh1213/OCP/issues"
 dependencies = [
     "mcp>=1.0",
     "pydantic>=2.7",

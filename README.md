@@ -25,6 +25,7 @@ Where MCP provides transport and tool-call mechanics, OCP adds:
 - [Quick start](#quick-start)
 - [Installation](#installation)
 - [Running the server](#running-the-server)
+- [Integrations](docs/integrations.md) — Claude Code, Claude Desktop, Cursor, HTTP/SSE
 - [Python client usage](#python-client-usage)
 - [Configuration reference](#configuration-reference)
 - [Deployment](#deployment)

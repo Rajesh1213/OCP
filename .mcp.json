@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ocp": {
+      "command": "uvx",
+      "args": ["ocp-server"],
+      "env": {
+        "OCP_DB_PATH": "${workspaceFolder}/.ocp.db"
+      }
+    }
+  }
+}
