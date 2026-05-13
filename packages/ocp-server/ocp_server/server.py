@@ -16,12 +16,10 @@ from mcp.types import (
 )
 
 from ocp_server.auth import (
-    AuthConfig,
     PermissionDeniedError,
     get_auth_context,
     load_auth_config,
     set_auth_context,
-    reset_auth_context,
 )
 from ocp_server.embedder import make_embedder, Tokenizer
 from ocp_server.indexer import index_workspace
@@ -423,7 +421,7 @@ async def _file_watch_loop(store: SQLiteStore, embedder: Any, emit: Any) -> None
     B8: re-queries workspace list every 60 s to pick up newly registered roots.
     """
     try:
-        from watchfiles import awatch, Change
+        from watchfiles import awatch
     except ImportError:
         log.warning("watchfiles not available — file watching disabled")
         return

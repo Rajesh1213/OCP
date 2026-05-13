@@ -1,6 +1,5 @@
 """§4.4 — Coordination tool conformance tests."""
 import pytest
-from ocp_client import OCPClient
 from ocp_client.types import OCPError
 
 

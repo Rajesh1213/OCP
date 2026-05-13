@@ -1,7 +1,5 @@
 """§4.5 / §7 — Events tool conformance tests."""
 import pytest
-from ocp_client import OCPClient
-from ocp_client.types import OCPError
 
 
 @pytest.mark.asyncio

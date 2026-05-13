@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ocp_server.models import Chunk
 from ocp_server.storage.base import BaseStore
 from ocp_server.tools.workspace import WorkspaceNotFoundError
 

@@ -1,6 +1,5 @@
 """§4.2 — Retrieval tool conformance tests."""
 import pytest
-from ocp_client import OCPClient
 from ocp_client.types import OCPError
 
 
@@ -66,8 +65,6 @@ async def test_search_excludes_stale_chunks(workspace):
     ws, client, tmp_path = workspace
     await client.workspace_index(ws.workspace_id)
     before = await client.context_search(ws.workspace_id, "hello")
-    ids_before = {c.id for c in before.chunks}
-
     await client.workspace_invalidate(ws.workspace_id, ["hello.py"])
     after = await client.context_search(ws.workspace_id, "hello")
     ids_after = {c.id for c in after.chunks}

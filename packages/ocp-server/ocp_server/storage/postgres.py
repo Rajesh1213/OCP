@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import datetime
 import json
-import math
 import os
 import time
 import uuid
@@ -277,10 +276,12 @@ class PostgresStore(BaseStore):
         if filters:
             if "kind" in filters:
                 where += f" AND kind=${i}"
-                params.append(filters["kind"]); i += 1
+                params.append(filters["kind"])
+                i += 1
             if "language" in filters:
                 where += f" AND language=${i}"
-                params.append(filters["language"]); i += 1
+                params.append(filters["language"])
+                i += 1
 
         params.append(vec_str)
         params.append(k)
@@ -408,19 +409,24 @@ class PostgresStore(BaseStore):
         i = 1
         if prefix:
             conditions.append(f"key LIKE ${i}")
-            params.append(f"{prefix}%"); i += 1
+            params.append(f"{prefix}%")
+            i += 1
         if scope:
             conditions.append(f"scope=${i}")
-            params.append(scope.value); i += 1
+            params.append(scope.value)
+            i += 1
         if workspace_id is not None:
             conditions.append(f"workspace_id=${i}")
-            params.append(workspace_id); i += 1
+            params.append(workspace_id)
+            i += 1
         if session_id is not None:
             conditions.append(f"session_id=${i}")
-            params.append(session_id); i += 1
+            params.append(session_id)
+            i += 1
         if agent_id is not None:
             conditions.append(f"agent_id=${i}")
-            params.append(agent_id); i += 1
+            params.append(agent_id)
+            i += 1
         where = " AND ".join(conditions) if conditions else "TRUE"
         params += [page + 1, offset]
         async with self._pool_conn() as conn:

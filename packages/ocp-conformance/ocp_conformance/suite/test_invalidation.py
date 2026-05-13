@@ -1,6 +1,5 @@
 """§6 — Invalidation contract conformance tests (previously missing)."""
 import pytest
-from ocp_client import OCPClient
 from ocp_client.types import OCPError
 
 
@@ -58,8 +57,6 @@ async def test_reindex_clears_stale(workspace):
 
     results = await client.context_search(ws.workspace_id, "hello world", k=1)
     assert results.chunks
-    chunk_before = results.chunks[0]
-
     await client.workspace_invalidate(ws.workspace_id, [str(tmp_path)])
     await client.workspace_index(ws.workspace_id)
 

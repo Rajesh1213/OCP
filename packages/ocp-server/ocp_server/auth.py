@@ -35,7 +35,6 @@ from __future__ import annotations
 import contextvars
 import os
 from dataclasses import dataclass, field
-from typing import Mapping
 
 
 # ------------------------------------------------------------------ #

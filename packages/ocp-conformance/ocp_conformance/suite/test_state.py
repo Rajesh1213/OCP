@@ -1,6 +1,5 @@
 """§4.3 / §5 — State tool conformance tests."""
 import pytest
-from ocp_client import OCPClient
 from ocp_client.types import OCPError
 
 
@@ -67,7 +66,7 @@ async def test_state_version_increments(workspace):
 async def test_state_optimistic_concurrency(workspace):
     """state.set with if_version MUST return CONFLICT on mismatch. §4.3"""
     ws, client, _ = workspace
-    r = await client.state_set("oc_key", "v1", scope="global", workspace_id=ws.workspace_id)
+    await client.state_set("oc_key", "v1", scope="global", workspace_id=ws.workspace_id)
     with pytest.raises(OCPError) as exc_info:
         await client.state_set("oc_key", "v2", scope="global",
                                workspace_id=ws.workspace_id, if_version=999)
@@ -112,7 +111,7 @@ async def test_scope_invalid_agent_without_id(workspace):
 async def test_state_delete_if_version_conflict(workspace):
     """state.delete with wrong if_version MUST return CONFLICT. §S1"""
     ws, client, _ = workspace
-    r = await client.state_set("del_oc", "v1", scope="global", workspace_id=ws.workspace_id)
+    await client.state_set("del_oc", "v1", scope="global", workspace_id=ws.workspace_id)
     with pytest.raises(OCPError) as exc_info:
         await client.state_delete("del_oc", scope="global",
                                   workspace_id=ws.workspace_id, if_version=999)
@@ -144,7 +143,7 @@ async def test_invalidate_idempotent_at_error_level(workspace):
     ws, client, tmp_path = workspace
     await client.workspace_index(ws.workspace_id)
     # Both calls must succeed without raising
-    r1 = await client.workspace_invalidate(ws.workspace_id, [str(tmp_path)])
+    await client.workspace_invalidate(ws.workspace_id, [str(tmp_path)])
     r2 = await client.workspace_invalidate(ws.workspace_id, [str(tmp_path)])
     # Second call returns 0 — already stale
     assert r2.invalidated == 0
