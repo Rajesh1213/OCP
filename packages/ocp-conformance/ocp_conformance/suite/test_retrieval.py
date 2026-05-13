@@ -52,7 +52,7 @@ async def test_get_chunk_stale_after_invalidation(workspace):
     assert result.chunks
     chunk_id = result.chunks[0].id
 
-    await client.workspace_invalidate(ws.workspace_id, ["hello.py"])
+    await client.workspace_invalidate(ws.workspace_id, [str(tmp_path / "hello.py")])
 
     with pytest.raises(OCPError) as exc_info:
         await client.context_get_chunk(chunk_id)
@@ -65,7 +65,7 @@ async def test_search_excludes_stale_chunks(workspace):
     ws, client, tmp_path = workspace
     await client.workspace_index(ws.workspace_id)
     before = await client.context_search(ws.workspace_id, "hello")
-    await client.workspace_invalidate(ws.workspace_id, ["hello.py"])
+    await client.workspace_invalidate(ws.workspace_id, [str(tmp_path / "hello.py")])
     after = await client.context_search(ws.workspace_id, "hello")
     ids_after = {c.id for c in after.chunks}
 

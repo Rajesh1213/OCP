@@ -307,23 +307,29 @@ class SQLiteStore(BaseStore):
     async def state_set(self, entry: StateEntry, if_version: int | None = None) -> int:
         # B2: explicit if_version parameter — no more version-encoding tricks
         # S3: auto-materialise session row if scope=session and session unknown
+        #
+        # NOTE: SQLite UNIQUE treats NULL as distinct from every other NULL, so
+        # ON CONFLICT DO UPDATE never fires when any key column is NULL (all scopes
+        # have at least one nullable column). We use explicit SELECT + UPDATE/INSERT
+        # with NULL-safe IS comparisons instead.
         async with self._write_lock:
             db = await self._conn()
 
-            if if_version is not None:
-                async with db.execute(
-                    """SELECT version FROM state
-                       WHERE key=? AND scope=?
-                         AND workspace_id IS ? AND session_id IS ? AND agent_id IS ?""",
-                    (entry.key, entry.scope.value,
-                     entry.workspace_id, entry.session_id, entry.agent_id),
-                ) as cur:
-                    row = await cur.fetchone()
-                current = row["version"] if row else 0
-                if current != if_version:
-                    raise ConflictError(
-                        f"version mismatch: expected {if_version}, got {current}"
-                    )
+            # Single SELECT covers both the if_version check and update-vs-insert decision.
+            async with db.execute(
+                """SELECT version FROM state
+                   WHERE key=? AND scope=?
+                     AND workspace_id IS ? AND session_id IS ? AND agent_id IS ?""",
+                (entry.key, entry.scope.value,
+                 entry.workspace_id, entry.session_id, entry.agent_id),
+            ) as cur:
+                existing = await cur.fetchone()
+
+            current = existing["version"] if existing else 0
+            if if_version is not None and current != if_version:
+                raise ConflictError(
+                    f"version mismatch: expected {if_version}, got {current}"
+                )
 
             # S3: lazy session materialisation
             if entry.scope == Scope.session and entry.session_id:
@@ -340,26 +346,33 @@ class SQLiteStore(BaseStore):
                     )
 
             now = _now()
-            async with db.execute(
-                """INSERT INTO state
-                   (key,value,scope,workspace_id,session_id,agent_id,
-                    ttl_seconds,updated_at,version)
-                   VALUES(?,?,?,?,?,?,?,?,1)
-                   ON CONFLICT(key,scope,workspace_id,session_id,agent_id) DO UPDATE SET
-                     value=excluded.value,
-                     ttl_seconds=excluded.ttl_seconds,
-                     updated_at=excluded.updated_at,
-                     version=version+1
-                   RETURNING version""",
-                (
-                    entry.key, json.dumps(entry.value), entry.scope.value,
-                    entry.workspace_id, entry.session_id, entry.agent_id,
-                    entry.ttl_seconds, now,
-                ),
-            ) as cur:
-                row = await cur.fetchone()
+            if existing:
+                new_version = current + 1
+                await db.execute(
+                    """UPDATE state SET value=?, ttl_seconds=?, updated_at=?, version=?
+                       WHERE key=? AND scope=?
+                         AND workspace_id IS ? AND session_id IS ? AND agent_id IS ?""",
+                    (
+                        json.dumps(entry.value), entry.ttl_seconds, now, new_version,
+                        entry.key, entry.scope.value,
+                        entry.workspace_id, entry.session_id, entry.agent_id,
+                    ),
+                )
+            else:
+                new_version = 1
+                await db.execute(
+                    """INSERT INTO state
+                       (key,value,scope,workspace_id,session_id,agent_id,
+                        ttl_seconds,updated_at,version)
+                       VALUES(?,?,?,?,?,?,?,?,1)""",
+                    (
+                        entry.key, json.dumps(entry.value), entry.scope.value,
+                        entry.workspace_id, entry.session_id, entry.agent_id,
+                        entry.ttl_seconds, now,
+                    ),
+                )
             await db.commit()
-        return row["version"] if row else 1
+        return new_version
 
     async def state_get(
         self, key: str, scope: Scope,

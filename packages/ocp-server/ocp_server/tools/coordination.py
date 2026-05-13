@@ -39,12 +39,9 @@ async def session_handoff(
     to_agent: str,
     message: object,
 ) -> dict:
-    # §3.3: "first OCP call that references a previously unseen session_id MUST
-    # materialise that session" — do NOT reject unknown session_ids.
+    # §4.6: session.handoff on an unknown session MUST return SESSION_NOT_FOUND.
     if not await store.session_exists(session_id):
-        # Auto-materialise; workspace_id unknown at this point, use empty string
-        # (session.open should be called first in well-formed flows).
-        await store.session_open("", session_id, None, {})
+        raise SessionNotFoundError(session_id)
 
     handoff_id = f"ho_{uuid.uuid4().hex[:12]}"
 

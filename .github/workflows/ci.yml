@@ -7,26 +7,41 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  lint:
+    name: Lint (ruff)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
-
       - name: Install dependencies
-        run: uv sync --all-packages --no-dev
-
-      - name: Install dev dependencies
         run: uv sync --all-packages
-
-      - name: Lint
+      - name: Run ruff
         run: uv run ruff check packages/
 
-      - name: Type-check
+  typecheck:
+    name: Type-check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --all-packages
+      - name: Run mypy
         run: uv run mypy packages/ocp-server/ocp_server packages/ocp-client/ocp_client --ignore-missing-imports
 
-      - name: Conformance tests
+  conformance:
+    name: Conformance tests (OCP-0002)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --all-packages
+      - name: Run conformance suite
         run: uv run pytest packages/ocp-conformance/ -v --tb=short

@@ -1,10 +1,12 @@
 """Shared pytest fixtures for the OCP conformance suite."""
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest_asyncio
 
@@ -27,22 +29,55 @@ def _server_cmd() -> str:
     return "ocp-server"
 
 
-# Function-scoped: each test gets its own server process.
-# This avoids anyio cancel-scope teardown issues that arise when a session-scoped
-# async fixture is finalized in a different asyncio task than it was entered in.
 @pytest_asyncio.fixture
-async def ocp_client():
-    """Start a fresh ocp-server process and yield a connected client."""
+async def ocp_client() -> Any:
+    """Start a fresh ocp-server process and yield a connected client.
+
+    The OCPClient.stdio context manager uses anyio cancel scopes internally.
+    pytest-asyncio finalises generator fixtures in a *new* asyncio Task via
+    event_loop.run_until_complete(), which causes anyio to raise
+    "Attempted to exit cancel scope in a different task than it was entered in".
+
+    Fix: run the entire client lifecycle inside a dedicated asyncio Task so
+    that all anyio cancel scopes are both entered and exited within that same
+    task.  The fixture only exchanges plain asyncio primitives (Event, Task)
+    with the pytest-asyncio finalizer, which are safe to use across tasks.
+    """
     cmd = _server_cmd()
     with tempfile.TemporaryDirectory() as tmpdir:
         db = os.path.join(tmpdir, "test.db")
         env = {**os.environ, "OCP_DB_PATH": db}
-        async with OCPClient.stdio([cmd], env=env) as client:
-            yield client
+
+        ready: asyncio.Event = asyncio.Event()
+        stop: asyncio.Event = asyncio.Event()
+        client_holder: list[OCPClient] = []
+        exc_holder: list[BaseException] = []
+
+        async def _run() -> None:
+            try:
+                async with OCPClient.stdio([cmd], env=env) as client:
+                    client_holder.append(client)
+                    ready.set()
+                    await stop.wait()
+            except BaseException as exc:
+                exc_holder.append(exc)
+                ready.set()
+
+        task = asyncio.create_task(_run())
+        await ready.wait()
+
+        if exc_holder:
+            task.cancel()
+            raise exc_holder[0]
+
+        yield client_holder[0]
+
+        stop.set()
+        await task
 
 
 @pytest_asyncio.fixture
-async def workspace(ocp_client: OCPClient, tmp_path: Path):
+async def workspace(ocp_client: OCPClient, tmp_path: Path) -> Any:
     """Register a temporary workspace with a few sample files."""
     (tmp_path / "hello.py").write_text("def hello():\n    return 'hello world'\n")
     (tmp_path / "README.md").write_text("# Test workspace\nThis is a test.\n")
