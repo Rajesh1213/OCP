@@ -1,0 +1,29 @@
+[project]
+name = "ocp-router"
+version = "0.1.0"
+description = "OCP Router — hybrid local/cloud model routing layer for Open Context Protocol"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.9",
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.urls]
+Homepage = "https://github.com/Rajesh1213/OCP"
+Repository = "https://github.com/Rajesh1213/OCP"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ocp_router"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = ["integration: requires a live Ollama instance (skipped in CI)"]
