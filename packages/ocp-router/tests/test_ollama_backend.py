@@ -5,7 +5,6 @@ The integration test is skipped unless Ollama is actually running.
 """
 from __future__ import annotations
 
-import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
