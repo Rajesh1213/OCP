@@ -17,8 +17,10 @@ openai    = ["openai>=1.0"]
 dev       = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [project.urls]
-Homepage = "https://github.com/Rajesh1213/OCP"
+Homepage = "https://www.opencontextprotocol.ai"
 Repository = "https://github.com/Rajesh1213/OCP"
+Documentation = "https://www.opencontextprotocol.ai/routing"
+"Bug Tracker" = "https://github.com/Rajesh1213/OCP/issues"
 
 [build-system]
 requires = ["hatchling"]

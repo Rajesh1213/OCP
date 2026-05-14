@@ -17,9 +17,9 @@ openai    = ["ocp-router[openai]>=0.2.0"]
 full    = ["ocp-router[anthropic,openai]>=0.2.0"]
 
 [project.urls]
-Homepage = "https://opencontextprotocol.ai"
+Homepage = "https://www.opencontextprotocol.ai"
 Repository = "https://github.com/Rajesh1213/OCP"
-Documentation = "https://opencontextprotocol.ai/routing"
+Documentation = "https://www.opencontextprotocol.ai/routing"
 "Bug Tracker" = "https://github.com/Rajesh1213/OCP/issues"
 
 [build-system]

@@ -23,9 +23,9 @@ dependencies = [
 postgres = ["asyncpg>=0.29"]
 
 [project.urls]
-Homepage = "https://github.com/Rajesh1213/OCP"
+Homepage = "https://www.opencontextprotocol.ai"
 Repository = "https://github.com/Rajesh1213/OCP"
-Documentation = "https://github.com/Rajesh1213/OCP/blob/main/docs/integrations.md"
+Documentation = "https://www.opencontextprotocol.ai/docs"
 "Bug Tracker" = "https://github.com/Rajesh1213/OCP/issues"
 
 [project.scripts]
