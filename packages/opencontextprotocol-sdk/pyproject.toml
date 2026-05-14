@@ -1,0 +1,35 @@
+[project]
+name = "opencontextprotocol-sdk"
+version = "0.2.0"
+description = "Open Context Protocol — one-line install for server, client, and hybrid routing"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+dependencies = [
+    "ocp-server>=0.2.0",
+    "ocp-client>=0.2.0",
+]
+
+[project.optional-dependencies]
+router  = ["ocp-router>=0.2.0"]
+anthropic = ["ocp-router[anthropic]>=0.2.0"]
+openai    = ["ocp-router[openai]>=0.2.0"]
+full    = ["ocp-router[anthropic,openai]>=0.2.0"]
+
+[project.urls]
+Homepage = "https://opencontextprotocol.ai"
+Repository = "https://github.com/Rajesh1213/OCP"
+Documentation = "https://opencontextprotocol.ai/routing"
+"Bug Tracker" = "https://github.com/Rajesh1213/OCP/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["opencontextprotocol_sdk"]
+
+[tool.uv.sources]
+ocp-server = { workspace = true }
+ocp-client = { workspace = true }
+ocp-router = { workspace = true }
