@@ -52,6 +52,51 @@ jobs:
         with:
           packages-dir: dist/
 
+  # ── PyPI: ocp-router ────────────────────────────────────────────────────
+  pypi-router:
+    name: Publish ocp-router to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # OIDC token scoped to ocp-router pending publisher
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Build ocp-router
+        run: uv build --package ocp-router --out-dir dist/
+
+      - name: Publish ocp-router
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  # ── PyPI: opencontextprotocol-sdk ────────────────────────────────────────
+  pypi-sdk:
+    name: Publish opencontextprotocol-sdk to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi
+    needs: [pypi-server, pypi-client, pypi-router]   # meta-package depends on all three
+    permissions:
+      id-token: write        # OIDC token scoped to opencontextprotocol-sdk pending publisher
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Build opencontextprotocol-sdk
+        run: uv build --package opencontextprotocol-sdk --out-dir dist/
+
+      - name: Publish opencontextprotocol-sdk
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
   # ── Docker ──────────────────────────────────────────────────────────────
   docker:
     name: Publish Docker image
