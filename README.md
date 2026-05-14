@@ -19,6 +19,7 @@ Where MCP provides transport and tool-call mechanics, OCP adds:
 - **Scoped state** — typed key-value store with `agent`, `session`, and `global` scopes
 - **Session coordination** — handoff between agents, checkpoints, restore
 - **Invalidation & events** — real-time notifications when files change or state is updated
+- **Hybrid routing** — routes requests to a local model or paid provider based on task complexity, reducing cost and keeping simple tasks private
 
 ---
 
@@ -28,6 +29,7 @@ Where MCP provides transport and tool-call mechanics, OCP adds:
 - [Installation](#installation)
 - [Running the server](#running-the-server)
 - [Integrations](docs/integrations.md) — Claude Code, Claude Desktop, Cursor, HTTP/SSE
+- [Hybrid routing](#hybrid-routing) — local vs paid model routing
 - [Python client usage](#python-client-usage)
 - [Configuration reference](#configuration-reference)
 - [Deployment](#deployment)
@@ -78,6 +80,7 @@ EOF
 ```bash
 pip install ocp-server          # server + CLI commands
 pip install ocp-client          # Python async client SDK
+pip install ocp-router          # hybrid local/cloud routing layer
 ```
 
 ### Zero-install via uvx
@@ -156,6 +159,77 @@ ocp-server-http
 ```bash
 OCP_HOST=127.0.0.1 OCP_PORT=9000 ocp-server-http
 ```
+
+---
+
+## Hybrid routing
+
+`ocp-router` sits between your agent and your AI providers, scoring each request and dispatching it to the right model tier automatically.
+
+```
+Developer / Agent
+      │
+      ▼
+ OCPRouter
+      │
+      ├── complexity < 0.5 ──► Local model (Ollama)   fast, free, private
+      │
+      └── complexity ≥ 0.5 ──► Paid provider           Claude / GPT-4 / any
+                                (vendor-neutral — implement ModelBackend)
+```
+
+Simple tasks (explain, search, summarise) stay local. Complex reasoning (security review, architecture, multi-file refactor) escalates to your paid provider. Your IDE workflow is unchanged.
+
+### Quick start
+
+```bash
+# 1. Install Ollama and pull a model
+brew install ollama
+ollama pull llama3.2
+ollama serve
+
+# 2. Install ocp-router
+pip install ocp-router
+
+# 3. Route requests
+```
+
+```python
+import asyncio
+from ocp_router import make_router
+
+async def main():
+    router = make_router()   # reads all config from env vars
+
+    # Simple — stays local
+    result = await router.route("explain the auth middleware")
+    print(result.route_to)           # "local"
+    print(result.classify.complexity_score)   # 0.0
+    print(result.text)
+
+    # Complex — escalates to paid provider
+    result = await router.route(
+        "review security vulnerabilities across all endpoints"
+    )
+    print(result.route_to)           # "paid"
+    print(result.classify.complexity_score)   # 0.55
+    print(result.classify.signals)   # ["security-sensitive"]
+    print(result.text)
+
+asyncio.run(main())
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `OCP_LOCAL_MODEL` | `llama3.2` | Local model name (any Ollama model) |
+| `OCP_OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
+| `OCP_PAID_BACKEND` | `anthropic` | Paid backend: `anthropic` or `openai` |
+| `OCP_PAID_MODEL` | `claude-sonnet-4-6` | Paid model identifier |
+| `OCP_ROUTE_THRESHOLD` | `0.5` | Complexity score at which requests escalate to paid |
+
+For IDE integration (Claude Code, Cursor, Windsurf) add these to your `.mcp.json` env block — no other changes needed. See [packages/ocp-router](packages/ocp-router/README.md) for full documentation.
 
 ---
 
@@ -424,6 +498,12 @@ ocp/
 │   │   └── ocp_client/
 │   │       ├── client.py        # OCPClient
 │   │       └── types.py         # Pydantic response types
+│   ├── ocp-router/          # Hybrid local/cloud model routing layer
+│   │   └── ocp_router/
+│   │       ├── router.py        # OCPRouter — classify → dispatch → RouteResult
+│   │       ├── classifier.py    # TaskClassifier — heuristic complexity scoring
+│   │       ├── factory.py       # make_router() / make_local_backend() / make_paid_backend()
+│   │       └── backends/        # OllamaBackend, AnthropicBackend, OpenAIBackend + protocol
 │   └── ocp-conformance/     # OCP-0002 conformance test suite
 │       └── ocp_conformance/
 │           ├── runner.py        # CLI entry point
