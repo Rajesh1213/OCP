@@ -3,6 +3,7 @@ members = [
     "packages/ocp-server",
     "packages/ocp-client",
     "packages/ocp-conformance",
+    "packages/ocp-router",
 ]
 
 [tool.uv]
