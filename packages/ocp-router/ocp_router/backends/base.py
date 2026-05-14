@@ -2,8 +2,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
+
+# ------------------------------------------------------------------ #
+# Classifier types                                                     #
+# ------------------------------------------------------------------ #
+
+TaskType = Literal["retrieval", "summarise", "explain", "refactor", "debug", "architect", "unknown"]
+RouteTarget = Literal["local", "paid"]
+
+
+@dataclass
+class ClassifyResult:
+    complexity_score: float   # 0.0 = trivially simple, 1.0 = maximum complexity
+    task_type: TaskType       # best-fit category for the request
+    signals: list[str]        # heuristics that fired, for tracing / debugging
+    route_to: RouteTarget     # derived decision: "local" or "paid"
+
+
+# ------------------------------------------------------------------ #
+# Inference types                                                      #
+# ------------------------------------------------------------------ #
 
 @dataclass
 class GenerateRequest:
