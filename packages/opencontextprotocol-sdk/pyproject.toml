@@ -1,20 +1,20 @@
 [project]
 name = "opencontextprotocol-sdk"
-version = "0.2.0"
+version = "0.2.1"
 description = "Open Context Protocol — one-line install for server, client, and hybrid routing"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 dependencies = [
-    "ocp-server>=0.2.0",
-    "ocp-client>=0.2.0",
+    "ocp-server>=0.2.1",
+    "ocp-client>=0.2.1",
 ]
 
 [project.optional-dependencies]
-router  = ["ocp-router>=0.2.0"]
-anthropic = ["ocp-router[anthropic]>=0.2.0"]
-openai    = ["ocp-router[openai]>=0.2.0"]
-full    = ["ocp-router[anthropic,openai]>=0.2.0"]
+router  = ["ocp-router>=0.2.1"]
+anthropic = ["ocp-router[anthropic]>=0.2.1"]
+openai    = ["ocp-router[openai]>=0.2.1"]
+full    = ["ocp-router[anthropic,openai]>=0.2.1"]
 
 [project.urls]
 Homepage = "https://www.opencontextprotocol.ai"

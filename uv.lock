@@ -1194,7 +1194,7 @@ wheels = [
 
 [[package]]
 name = "ocp-client"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/ocp-client" }
 dependencies = [
     { name = "mcp" },
@@ -1232,7 +1232,7 @@ requires-dist = [
 
 [[package]]
 name = "ocp-router"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/ocp-router" }
 dependencies = [
     { name = "aiohttp" },
@@ -1266,7 +1266,7 @@ provides-extras = ["anthropic", "openai", "dev"]
 
 [[package]]
 name = "ocp-server"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/ocp-server" }
 dependencies = [
     { name = "aiofiles" },
@@ -1321,7 +1321,7 @@ wheels = [
 
 [[package]]
 name = "opencontextprotocol-sdk"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/opencontextprotocol-sdk" }
 dependencies = [
     { name = "ocp-client" },
