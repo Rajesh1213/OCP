@@ -4,17 +4,24 @@ from ocp_router.backends.base import (
     GenerateRequest,
     GenerateResponse,
     LocalModelBackend,
+    ModelBackend,
+    RouteResult,
     RouteTarget,
     TaskType,
 )
 from ocp_router.backends.ollama import OllamaBackend
 from ocp_router.classifier import TaskClassifier
-from ocp_router.factory import make_local_backend
+from ocp_router.factory import make_local_backend, make_paid_backend, make_router
+from ocp_router.router import OCPRouter
 
 __all__ = [
+    # Router
+    "OCPRouter",
+    "RouteResult",
     # Backends
     "OllamaBackend",
     "LocalModelBackend",
+    "ModelBackend",
     # Inference types
     "GenerateRequest",
     "GenerateResponse",
@@ -23,6 +30,8 @@ __all__ = [
     "ClassifyResult",
     "TaskType",
     "RouteTarget",
-    # Factory
+    # Factories
     "make_local_backend",
+    "make_paid_backend",
+    "make_router",
 ]

@@ -1,4 +1,4 @@
-"""Protocol definition for local model backends."""
+"""Protocol and type definitions for OCP router backends."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -46,7 +46,7 @@ class GenerateResponse:
 
 @runtime_checkable
 class LocalModelBackend(Protocol):
-    """Minimum interface every local model backend must implement."""
+    """Minimum interface every model backend must implement (local or paid)."""
 
     @property
     def model(self) -> str:
@@ -60,3 +60,22 @@ class LocalModelBackend(Protocol):
     async def generate(self, request: GenerateRequest) -> GenerateResponse:
         """Run inference and return the response."""
         ...
+
+
+# Unified type used by OCPRouter — local and paid backends share the same interface.
+ModelBackend = LocalModelBackend
+
+
+# ------------------------------------------------------------------ #
+# Router result                                                        #
+# ------------------------------------------------------------------ #
+
+@dataclass
+class RouteResult:
+    text: str
+    route_to: RouteTarget        # which tier actually handled the request
+    classify: ClassifyResult     # full classification with signals + score
+    model: str                   # exact model identifier used
+    prompt_tokens: int
+    completion_tokens: int
+    duration_ms: float
