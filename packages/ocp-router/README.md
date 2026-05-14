@@ -102,7 +102,7 @@ Request prompt
 | "summarise the last session" | 0.00 | local |
 | "refactor the login function" | 0.25 | local |
 | — threshold (default 0.5) — | | |
-| "refactor auth across all files" | 0.60 | paid |
+| "refactor auth across all files" | 0.80 | paid |
 | "review security vulnerabilities" | 0.55 | paid |
 | "design the payment architecture" | 0.55 | paid |
 | "debug this production deadlock" | 0.60 | paid |
