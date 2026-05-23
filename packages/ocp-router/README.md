@@ -269,8 +269,3 @@ pytest packages/ocp-router/tests/ -k "not integration" -v
 pytest packages/ocp-router/tests/ -m integration -v
 ```
 
----
-
-## What's next
-
-- `ocp.prompt.prepare` — local SLM compresses and optimises prompts before they reach the paid provider, reducing token usage and improving answer quality

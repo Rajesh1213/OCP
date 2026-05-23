@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ocp-server)](https://pypi.org/project/ocp-server/) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-**Status:** v0.1.0 — RFC draft | [PyPI](https://pypi.org/project/ocp-server/) | Apache-2.0 (code) · CC-BY 4.0 (spec)
+**Status:** v0.3.0 | [PyPI](https://pypi.org/project/ocp-server/) | Apache-2.0 (code) · CC-BY 4.0 (spec)
 
 OCP is a protocol for sharing retrievable context, persistent state, and invalidation events across AI agents, models, frameworks, and organizations. It is layered on top of the [Model Context Protocol (MCP)](https://modelcontextprotocol.io): every OCP server is an MCP server, every OCP client is an MCP client.
 
@@ -20,6 +20,7 @@ Where MCP provides transport and tool-call mechanics, OCP adds:
 - **Session coordination** — handoff between agents, checkpoints, restore
 - **Invalidation & events** — real-time notifications when files change or state is updated
 - **Hybrid routing** — routes requests to a local model or paid provider based on task complexity, reducing cost and keeping simple tasks private
+- **Prompt optimization** — compresses and refines prompts using a local SLM before they reach the paid provider, reducing token cost and improving output quality; accumulates raw→optimised→result traces for fine-tuning
 
 ---
 
@@ -30,6 +31,7 @@ Where MCP provides transport and tool-call mechanics, OCP adds:
 - [Running the server](#running-the-server)
 - [Integrations](docs/integrations.md) — Claude Code, Claude Desktop, Cursor, HTTP/SSE
 - [Hybrid routing](#hybrid-routing) — local vs paid model routing
+- [Prompt optimization](#prompt-optimization) — compress prompts before sending to paid model
 - [Python client usage](#python-client-usage)
 - [Configuration reference](#configuration-reference)
 - [Deployment](#deployment)
@@ -230,6 +232,69 @@ asyncio.run(main())
 | `OCP_ROUTE_THRESHOLD` | `0.5` | Complexity score at which requests escalate to paid |
 
 For IDE integration (Claude Code, Cursor, Windsurf) add these to your `.mcp.json` env block — no other changes needed. See [packages/ocp-router](packages/ocp-router/README.md) for full documentation.
+
+---
+
+## Prompt optimization
+
+`prompt.prepare` is an MCP tool built into `ocp-server`. It uses a local SLM (via Ollama) to compress and reformat a raw developer prompt before it is sent to a paid model, reducing token cost and sharpening the output.
+
+```
+Raw prompt (verbose)
+       │
+       ▼
+  prompt.prepare
+       │   ├── pulls relevant workspace chunks (context)
+       │   ├── injects recent session history
+       │   └── compresses with local Ollama SLM
+       │
+       ▼
+Optimised prompt (tight, model-ready) ──► Paid model (Claude / GPT-4 / any)
+       │
+       ▼
+  prompt.record_result  ← log the paid-model output back
+       │
+       ▼
+  raw → optimised → result trace  (fine-tuning dataset, grows over time)
+```
+
+### Usage
+
+```python
+# 1. Compress the prompt before sending to your paid model
+result = await client.call_tool("prompt.prepare", {
+    "prompt": "Can you please help me understand in great detail how the auth middleware works and why it is structured this way?",
+    "workspace_id": ws_id,      # optional — injects relevant code chunks
+    "session_id": sess_id,      # optional — injects session history
+    "target_model": "claude",   # optional — formats for the target family
+    "budget_tokens": 800,       # optional — target output size
+})
+
+print(result["optimized_prompt"])   # tight, context-aware version
+print(result["compression_ratio"])  # e.g. 3.2 (3× shorter)
+print(result["original_tokens"])    # token count before
+print(result["optimized_tokens"])   # token count after
+trace_id = result["trace_id"]
+
+# 2. Send optimised_prompt to your paid model
+paid_response = await my_paid_model.generate(result["optimized_prompt"])
+
+# 3. Record the result — builds the fine-tuning dataset
+await client.call_tool("prompt.record_result", {
+    "trace_id": trace_id,
+    "result": paid_response.text,
+})
+```
+
+If Ollama is not running, `prompt.prepare` returns the original prompt unchanged (`"optimized": false`) — no errors, no disruption.
+
+### Requirements
+
+```bash
+pip install "ocp-server[router]"
+ollama pull llama3.2
+ollama serve
+```
 
 ---
 
@@ -492,7 +557,7 @@ ocp/
 │   │       ├── auth.py          # Bearer token auth, workspace isolation
 │   │       ├── embedder.py      # Hash / FastEmbed / OpenAI backends
 │   │       ├── indexer.py       # Filesystem workspace indexer
-│   │       ├── tools/           # Tool implementations (§4.1–4.5)
+│   │       ├── tools/           # Tool implementations (§4.1–4.5 + prompt optimization)
 │   │       └── storage/         # SQLite + Postgres backends
 │   ├── ocp-client/          # Python async client SDK
 │   │   └── ocp_client/

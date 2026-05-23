@@ -10,6 +10,7 @@ Every OCP server is an MCP server. Drop it into any MCP-compatible IDE or agent 
 - **Scoped state** — typed key-value store with `agent`, `session`, and `global` scopes and optimistic concurrency control
 - **Session coordination** — agent handoff, named checkpoints, restore from checkpoint
 - **Invalidation & events** — file watcher marks stale chunks automatically; real-time event subscriptions with replay
+- **Prompt optimization** — `prompt.prepare` compresses raw prompts using a local SLM before they reach a paid model; `prompt.record_result` logs the output back to accumulate a fine-tuning dataset
 
 ## Quick start
 
@@ -95,6 +96,30 @@ The reference server passes all 44 OCP-0002 conformance tests at the `core+coord
 pip install ocp-conformance
 ocp-conformance
 ```
+
+## Prompt optimization
+
+Requires `ocp-server[router]` and a running Ollama instance.
+
+```python
+# Compress a verbose prompt before sending to a paid model
+result = await client.call_tool("prompt.prepare", {
+    "prompt": "your raw prompt here",
+    "workspace_id": ws_id,    # optional — injects relevant code context
+    "session_id": sess_id,    # optional — injects session history
+    "budget_tokens": 800,
+})
+# result["optimized_prompt"]  → compressed, model-ready
+# result["trace_id"]          → use with prompt.record_result
+
+# Log the paid-model output back (builds fine-tuning dataset)
+await client.call_tool("prompt.record_result", {
+    "trace_id": result["trace_id"],
+    "result": paid_model_output,
+})
+```
+
+If Ollama is unavailable, the tool returns the original prompt unchanged (`"optimized": false`).
 
 ## Links
 
