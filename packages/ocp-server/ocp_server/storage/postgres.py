@@ -677,6 +677,19 @@ class PostgresStore(BaseStore):
                     count += 1
         return count
 
+    # ------------------------------------------------------------------ #
+    # Prompt traces (not yet implemented for Postgres)                     #
+    # ------------------------------------------------------------------ #
+
+    async def save_prompt_trace(self, trace: dict) -> None:
+        raise NotImplementedError("prompt_traces not yet implemented for PostgresStore")
+
+    async def record_prompt_result(self, trace_id: str, result: str) -> bool:
+        raise NotImplementedError("prompt_traces not yet implemented for PostgresStore")
+
+    async def get_prompt_trace(self, trace_id: str) -> dict | None:
+        raise NotImplementedError("prompt_traces not yet implemented for PostgresStore")
+
 
 # ------------------------------------------------------------------ #
 # Row helpers                                                          #
