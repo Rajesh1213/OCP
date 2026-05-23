@@ -24,7 +24,7 @@ from ocp_server.auth import (
 from ocp_server.embedder import make_embedder, Tokenizer
 from ocp_server.indexer import index_workspace
 from ocp_server.storage.sqlite import SQLiteStore
-from ocp_server.tools import coordination, events, retrieval, state, workspace
+from ocp_server.tools import coordination, events, prompt, retrieval, state, workspace
 
 log = logging.getLogger(__name__)
 
@@ -383,6 +383,24 @@ async def _dispatch(
         case "events.unsubscribe":
             return await events.events_unsubscribe(store, args["subscription_id"])
 
+        # ── prompt ─────────────────────────────────────────────────
+        case "prompt.prepare":
+            return await prompt.prompt_prepare(
+                store, embedder, tokenizer,
+                prompt=args["prompt"],
+                workspace_id=args.get("workspace_id"),
+                session_id=args.get("session_id"),
+                target_model=args.get("target_model", "default"),
+                budget_tokens=args.get("budget_tokens", 800),
+            )
+
+        case "prompt.record_result":
+            return await prompt.prompt_record_result(
+                store,
+                trace_id=args["trace_id"],
+                result=args["result"],
+            )
+
         case _:
             return _ocp_error("METHOD_NOT_FOUND", f"Unknown tool: {name}")
 
@@ -595,6 +613,37 @@ _ALL_TOOLS: list[Tool] = [
          description="Unsubscribe from events. §4.5",
          inputSchema={"type": "object", "required": ["subscription_id"],
                       "properties": {"subscription_id": {"type": "string"}}}),
+    # prompt
+    Tool(name="prompt.prepare",
+         description=(
+             "Compress and optimise a raw prompt using a local SLM before it is "
+             "sent to a paid model. Returns an optimised prompt and a trace_id "
+             "for result logging."
+         ),
+         inputSchema={
+             "type": "object",
+             "required": ["prompt"],
+             "properties": {
+                 "prompt": {"type": "string", "description": "Raw developer prompt"},
+                 "workspace_id": {"type": "string", "description": "Pull relevant context chunks from this workspace"},
+                 "session_id": {"type": "string", "description": "Inject recent session state as history"},
+                 "target_model": {"type": "string", "default": "default", "description": "Target model family (e.g. claude, gpt-4)"},
+                 "budget_tokens": {"type": "integer", "default": 800, "description": "Target token budget for the optimised output"},
+             },
+         }),
+    Tool(name="prompt.record_result",
+         description=(
+             "Record the paid-model result for a prompt trace. "
+             "Builds the raw→optimised→result dataset for fine-tuning."
+         ),
+         inputSchema={
+             "type": "object",
+             "required": ["trace_id", "result"],
+             "properties": {
+                 "trace_id": {"type": "string"},
+                 "result": {"type": "string", "description": "Output from the paid model"},
+             },
+         }),
 ]
 
 

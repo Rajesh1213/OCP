@@ -136,3 +136,13 @@ class BaseStore(ABC):
     async def delete_session_state(self, session_id: str) -> int:
         """Delete all state entries scoped to session_id. Returns deleted count."""
         ...
+
+    # --- prompt traces ---
+    @abstractmethod
+    async def save_prompt_trace(self, trace: dict) -> None: ...
+
+    @abstractmethod
+    async def record_prompt_result(self, trace_id: str, result: str) -> bool: ...
+
+    @abstractmethod
+    async def get_prompt_trace(self, trace_id: str) -> dict | None: ...

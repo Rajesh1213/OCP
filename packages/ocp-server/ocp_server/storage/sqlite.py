@@ -100,6 +100,22 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_sub ON events(subscription_id, event_id);
 CREATE INDEX IF NOT EXISTS idx_events_ws  ON events(workspace_id, event_id);
+
+CREATE TABLE IF NOT EXISTS prompt_traces (
+    trace_id          TEXT PRIMARY KEY,
+    created_at        TEXT NOT NULL,
+    raw_prompt        TEXT NOT NULL,
+    optimized_prompt  TEXT NOT NULL,
+    result            TEXT,
+    target_model      TEXT,
+    workspace_id      TEXT,
+    session_id        TEXT,
+    raw_tokens        INTEGER NOT NULL DEFAULT 0,
+    optimized_tokens  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_prompt_traces_ws ON prompt_traces(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_prompt_traces_session ON prompt_traces(session_id);
 """
 
 
@@ -724,6 +740,52 @@ class SQLiteStore(BaseStore):
                 rows = list(await cur.fetchall())
             await db.commit()
         return len(rows)
+
+    # ------------------------------------------------------------------ #
+    # Prompt traces                                                        #
+    # ------------------------------------------------------------------ #
+
+    async def save_prompt_trace(self, trace: dict) -> None:
+        async with self._write_lock:
+            db = await self._conn()
+            await db.execute(
+                """INSERT INTO prompt_traces
+                   (trace_id, created_at, raw_prompt, optimized_prompt, result,
+                    target_model, workspace_id, session_id, raw_tokens, optimized_tokens)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    trace["trace_id"],
+                    trace["created_at"],
+                    trace["raw_prompt"],
+                    trace["optimized_prompt"],
+                    trace.get("result"),
+                    trace.get("target_model"),
+                    trace.get("workspace_id"),
+                    trace.get("session_id"),
+                    trace.get("raw_tokens", 0),
+                    trace.get("optimized_tokens", 0),
+                ),
+            )
+            await db.commit()
+
+    async def record_prompt_result(self, trace_id: str, result: str) -> bool:
+        async with self._write_lock:
+            db = await self._conn()
+            async with db.execute(
+                "UPDATE prompt_traces SET result=? WHERE trace_id=? RETURNING trace_id",
+                (result, trace_id),
+            ) as cur:
+                row = await cur.fetchone()
+            await db.commit()
+        return row is not None
+
+    async def get_prompt_trace(self, trace_id: str) -> dict | None:
+        db = await self._conn()
+        async with db.execute(
+            "SELECT * FROM prompt_traces WHERE trace_id=?", (trace_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
 
 
 # ------------------------------------------------------------------ #

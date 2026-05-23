@@ -21,6 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["asyncpg>=0.29"]
+router   = ["ocp-router>=0.2.1"]
+dev      = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [project.urls]
 Homepage = "https://www.opencontextprotocol.ai"
@@ -32,9 +34,16 @@ Documentation = "https://www.opencontextprotocol.ai/docs"
 ocp-server      = "ocp_server.server:main"
 ocp-server-http = "ocp_server.server_http:main"
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = ["integration: requires a live Ollama instance (skipped in CI)"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ocp_server"]
+
+[tool.uv.sources]
+ocp-router = { workspace = true }
