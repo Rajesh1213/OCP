@@ -11,10 +11,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-router  = ["ocp-router>=0.3.0"]
+router    = ["ocp-router>=0.3.0"]
 anthropic = ["ocp-router[anthropic]>=0.3.0"]
 openai    = ["ocp-router[openai]>=0.3.0"]
-full    = ["ocp-router[anthropic,openai]>=0.3.0"]
+trainer   = ["ocp-trainer>=0.3.0"]
+full      = ["ocp-router[anthropic,openai]>=0.3.0", "ocp-trainer>=0.3.0"]
 
 [project.urls]
 Homepage = "https://www.opencontextprotocol.ai"
@@ -30,6 +31,7 @@ build-backend = "hatchling.build"
 packages = ["opencontextprotocol_sdk"]
 
 [tool.uv.sources]
-ocp-server = { workspace = true }
-ocp-client = { workspace = true }
-ocp-router = { workspace = true }
+ocp-server  = { workspace = true }
+ocp-client  = { workspace = true }
+ocp-router  = { workspace = true }
+ocp-trainer = { workspace = true }

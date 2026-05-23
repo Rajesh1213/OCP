@@ -787,6 +787,157 @@ class SQLiteStore(BaseStore):
             row = await cur.fetchone()
         return dict(row) if row else None
 
+    async def get_trace_stats(
+        self,
+        workspace_id: str | None = None,
+        since: str | None = None,
+    ) -> dict:
+        db = await self._conn()
+        filters: list[str] = []
+        params: list = []
+        if workspace_id:
+            filters.append("workspace_id=?")
+            params.append(workspace_id)
+        if since:
+            filters.append("created_at>=?")
+            params.append(since)
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+
+        async with db.execute(
+            f"""SELECT
+                COUNT(*)                                    AS total,
+                SUM(CASE WHEN result IS NOT NULL THEN 1 ELSE 0 END) AS completed,
+                SUM(CASE WHEN optimized_tokens < raw_tokens THEN 1 ELSE 0 END) AS optimized,
+                COALESCE(SUM(raw_tokens), 0)               AS raw_tokens_total,
+                COALESCE(SUM(optimized_tokens), 0)         AS opt_tokens_total,
+                COALESCE(SUM(raw_tokens - optimized_tokens), 0) AS tokens_saved,
+                COALESCE(AVG(CASE WHEN optimized_tokens > 0
+                    THEN CAST(raw_tokens AS REAL)/optimized_tokens END), 1.0) AS avg_ratio
+            FROM prompt_traces {where}""",
+            params,
+        ) as cur:
+            raw_agg = await cur.fetchone()
+            assert raw_agg is not None
+            agg = dict(raw_agg)
+
+        async with db.execute(
+            f"""SELECT target_model,
+                COUNT(*) AS requests,
+                COALESCE(SUM(raw_tokens - optimized_tokens), 0) AS tokens_saved
+            FROM prompt_traces {where}
+            GROUP BY target_model""",
+            params,
+        ) as cur:
+            by_model = {
+                (r["target_model"] or "default"): {
+                    "requests": r["requests"],
+                    "tokens_saved": r["tokens_saved"],
+                }
+                for r in await cur.fetchall()
+            }
+
+        async with db.execute(
+            f"""SELECT workspace_id,
+                COUNT(*) AS requests,
+                COALESCE(SUM(raw_tokens - optimized_tokens), 0) AS tokens_saved
+            FROM prompt_traces {where}
+            GROUP BY workspace_id""",
+            params,
+        ) as cur:
+            by_workspace = {
+                (r["workspace_id"] or "none"): {
+                    "requests": r["requests"],
+                    "tokens_saved": r["tokens_saved"],
+                }
+                for r in await cur.fetchall()
+            }
+
+        async with db.execute(
+            f"""SELECT substr(created_at, 1, 10) AS date,
+                COUNT(*) AS requests,
+                COALESCE(SUM(raw_tokens - optimized_tokens), 0) AS tokens_saved
+            FROM prompt_traces {where}
+            GROUP BY date
+            ORDER BY date DESC
+            LIMIT 30""",
+            params,
+        ) as cur:
+            daily = [dict(r) for r in await cur.fetchall()]
+
+        return {
+            "total_requests": agg["total"],
+            "completed_traces": agg["completed"],
+            "optimized_requests": agg["optimized"],
+            "passthrough_requests": agg["total"] - agg["optimized"],
+            "total_tokens_raw": agg["raw_tokens_total"],
+            "total_tokens_optimized": agg["opt_tokens_total"],
+            "total_tokens_saved": agg["tokens_saved"],
+            "avg_compression_ratio": round(float(agg["avg_ratio"]), 2),
+            "by_model": by_model,
+            "by_workspace": by_workspace,
+            "daily": daily,
+            "finetune_ready": agg["completed"] >= 100,
+        }
+
+    async def export_traces(
+        self,
+        fmt: str = "alpaca",
+        workspace_id: str | None = None,
+        since: str | None = None,
+        only_completed: bool = True,
+    ) -> list[dict]:
+        db = await self._conn()
+        filters: list[str] = []
+        params: list = []
+        if only_completed:
+            filters.append("result IS NOT NULL")
+        if workspace_id:
+            filters.append("workspace_id=?")
+            params.append(workspace_id)
+        if since:
+            filters.append("created_at>=?")
+            params.append(since)
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+
+        async with db.execute(
+            f"SELECT * FROM prompt_traces {where} ORDER BY created_at",
+            params,
+        ) as cur:
+            rows = [dict(r) for r in await cur.fetchall()]
+
+        if fmt == "alpaca":
+            return [
+                {
+                    "instruction": "Compress and optimise this prompt for an AI language model.",
+                    "input": r["raw_prompt"],
+                    "output": r["optimized_prompt"],
+                }
+                for r in rows
+            ]
+        if fmt == "chatml":
+            return [
+                {
+                    "messages": [
+                        {"role": "system", "content": "You are a prompt optimizer. Compress and improve the given prompt."},
+                        {"role": "user", "content": r["raw_prompt"]},
+                        {"role": "assistant", "content": r["optimized_prompt"]},
+                    ]
+                }
+                for r in rows
+            ]
+        if fmt == "openai":
+            return [
+                {
+                    "messages": [
+                        {"role": "system", "content": "You are a prompt optimizer. Compress and improve the given prompt."},
+                        {"role": "user", "content": r["raw_prompt"]},
+                        {"role": "assistant", "content": r["optimized_prompt"]},
+                    ]
+                }
+                for r in rows
+            ]
+        raise ValueError(f"Unknown format: {fmt}. Use alpaca, chatml, or openai.")
+
 
 # ------------------------------------------------------------------ #
 # Helpers                                                              #

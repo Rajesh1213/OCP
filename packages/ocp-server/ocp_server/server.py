@@ -24,7 +24,7 @@ from ocp_server.auth import (
 from ocp_server.embedder import make_embedder, Tokenizer
 from ocp_server.indexer import index_workspace
 from ocp_server.storage.sqlite import SQLiteStore
-from ocp_server.tools import coordination, events, prompt, retrieval, state, workspace
+from ocp_server.tools import coordination, events, prompt, retrieval, state, traces, workspace
 
 log = logging.getLogger(__name__)
 
@@ -401,6 +401,23 @@ async def _dispatch(
                 result=args["result"],
             )
 
+        # ── traces ─────────────────────────────────────────────────
+        case "traces.stats":
+            return await traces.traces_stats(
+                store,
+                workspace_id=args.get("workspace_id"),
+                since=args.get("since"),
+            )
+
+        case "traces.export":
+            return await traces.traces_export(
+                store,
+                fmt=args.get("format", "alpaca"),
+                workspace_id=args.get("workspace_id"),
+                since=args.get("since"),
+                only_completed=args.get("only_completed", True),
+            )
+
         case _:
             return _ocp_error("METHOD_NOT_FOUND", f"Unknown tool: {name}")
 
@@ -642,6 +659,43 @@ _ALL_TOOLS: list[Tool] = [
              "properties": {
                  "trace_id": {"type": "string"},
                  "result": {"type": "string", "description": "Output from the paid model"},
+             },
+         }),
+    # traces
+    Tool(name="traces.stats",
+         description=(
+             "Token savings dashboard: request counts, tokens saved, estimated cost saved, "
+             "breakdown by model and workspace, daily time-series. "
+             "Cost rate configurable via OCP_COST_PER_1K_TOKENS (default $0.01/1k)."
+         ),
+         inputSchema={
+             "type": "object",
+             "properties": {
+                 "workspace_id": {"type": "string", "description": "Filter to a single workspace"},
+                 "since": {"type": "string", "description": "ISO-8601 datetime — only include traces after this date"},
+             },
+         }),
+    Tool(name="traces.export",
+         description=(
+             "Export prompt traces as a JSONL training dataset. "
+             "Supports alpaca, chatml, and openai fine-tuning formats."
+         ),
+         inputSchema={
+             "type": "object",
+             "properties": {
+                 "format": {
+                     "type": "string",
+                     "enum": ["alpaca", "chatml", "openai"],
+                     "default": "alpaca",
+                     "description": "Training data format",
+                 },
+                 "workspace_id": {"type": "string"},
+                 "since": {"type": "string", "description": "ISO-8601 datetime cutoff"},
+                 "only_completed": {
+                     "type": "boolean",
+                     "default": True,
+                     "description": "Only export traces that have a recorded result",
+                 },
              },
          }),
 ]

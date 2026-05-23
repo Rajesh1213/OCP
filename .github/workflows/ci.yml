@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-packages
       - name: Run mypy
-        run: uv run mypy packages/ocp-server/ocp_server packages/ocp-client/ocp_client packages/ocp-router/ocp_router --ignore-missing-imports
+        run: uv run mypy packages/ocp-server/ocp_server packages/ocp-client/ocp_client packages/ocp-router/ocp_router packages/ocp-trainer/ocp_trainer --ignore-missing-imports
 
   test-router:
     name: Unit tests (ocp-router)
@@ -45,6 +45,32 @@ jobs:
         run: uv sync --all-packages
       - name: Run ocp-router unit tests
         run: uv run pytest packages/ocp-router/tests/ -v --tb=short -k "not integration"
+
+  test-server:
+    name: Unit tests (ocp-server)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --all-packages
+      - name: Run ocp-server unit tests
+        run: uv run pytest packages/ocp-server/tests/ -v --tb=short
+
+  test-trainer:
+    name: Unit tests (ocp-trainer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --all-packages
+      - name: Run ocp-trainer unit tests
+        run: uv run pytest packages/ocp-trainer/tests/ -v --tb=short
 
   conformance:
     name: Conformance tests (OCP-0002)

@@ -74,12 +74,34 @@ jobs:
         with:
           packages-dir: dist/
 
+  # ── PyPI: ocp-trainer ───────────────────────────────────────────────────
+  pypi-trainer:
+    name: Publish ocp-trainer to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # OIDC token scoped to ocp-trainer pending publisher
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Build ocp-trainer
+        run: uv build --package ocp-trainer --out-dir dist/
+
+      - name: Publish ocp-trainer
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
   # ── PyPI: opencontextprotocol-sdk ────────────────────────────────────────
   pypi-sdk:
     name: Publish opencontextprotocol-sdk to PyPI
     runs-on: ubuntu-latest
     environment: pypi
-    needs: [pypi-server, pypi-client, pypi-router]   # meta-package depends on all three
+    needs: [pypi-server, pypi-client, pypi-router, pypi-trainer]
     permissions:
       id-token: write        # OIDC token scoped to opencontextprotocol-sdk pending publisher
     steps:

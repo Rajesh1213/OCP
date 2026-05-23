@@ -146,3 +146,17 @@ class BaseStore(ABC):
 
     @abstractmethod
     async def get_prompt_trace(self, trace_id: str) -> dict | None: ...
+
+    @abstractmethod
+    async def get_trace_stats(
+        self, workspace_id: str | None = None, since: str | None = None
+    ) -> dict: ...
+
+    @abstractmethod
+    async def export_traces(
+        self,
+        fmt: str = "alpaca",
+        workspace_id: str | None = None,
+        since: str | None = None,
+        only_completed: bool = True,
+    ) -> list[dict]: ...

@@ -681,13 +681,27 @@ class PostgresStore(BaseStore):
     # Prompt traces (not yet implemented for Postgres)                     #
     # ------------------------------------------------------------------ #
 
-    async def save_prompt_trace(self, trace: dict) -> None:
+    async def save_prompt_trace(self, _trace: dict) -> None:
         raise NotImplementedError("prompt_traces not yet implemented for PostgresStore")
 
-    async def record_prompt_result(self, trace_id: str, result: str) -> bool:
+    async def record_prompt_result(self, _trace_id: str, _result: str) -> bool:
         raise NotImplementedError("prompt_traces not yet implemented for PostgresStore")
 
-    async def get_prompt_trace(self, trace_id: str) -> dict | None:
+    async def get_prompt_trace(self, _trace_id: str) -> dict | None:
+        raise NotImplementedError("prompt_traces not yet implemented for PostgresStore")
+
+    async def get_trace_stats(
+        self, _workspace_id: str | None = None, _since: str | None = None
+    ) -> dict:
+        raise NotImplementedError("prompt_traces not yet implemented for PostgresStore")
+
+    async def export_traces(
+        self,
+        _fmt: str = "alpaca",
+        _workspace_id: str | None = None,
+        _since: str | None = None,
+        _only_completed: bool = True,
+    ) -> list[dict]:
         raise NotImplementedError("prompt_traces not yet implemented for PostgresStore")
 
 

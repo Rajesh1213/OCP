@@ -5,6 +5,7 @@ members = [
     "packages/ocp-conformance",
     "packages/ocp-router",
     "packages/opencontextprotocol-sdk",
+    "packages/ocp-trainer",
 ]
 
 [tool.uv]
