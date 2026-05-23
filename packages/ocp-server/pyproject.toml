@@ -1,6 +1,6 @@
 [project]
 name = "ocp-server"
-version = "0.2.1"
+version = "0.3.0"
 description = "Open Context Protocol — reference server implementation"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["asyncpg>=0.29"]
-router   = ["ocp-router>=0.2.1"]
+router   = ["ocp-router>=0.3.0"]
 dev      = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [project.urls]
