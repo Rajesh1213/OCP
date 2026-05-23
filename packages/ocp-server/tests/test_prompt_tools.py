@@ -87,7 +87,7 @@ async def test_prepare_passthrough_saves_trace():
     tokenizer = _make_tokenizer()
 
     with patch("ocp_server.tools.prompt._local_backend", AsyncMock(return_value=None)):
-        result = await prompt_prepare(
+        await prompt_prepare(
             store, embedder, tokenizer,
             prompt="hello",
             workspace_id=None,
